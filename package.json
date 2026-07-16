@@ -1,16 +1,21 @@
 {
-  "name": "mail",
+  "name": "mail-bridge-desktop",
   "version": "1.0.0",
-  "description": "",
+  "description": "1. We need to create a self-signed certificate for connecting to Apple Mail:",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/internxt/mail-bridge-desktop.git"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
-  "dependencies": {
-    "internxt-crypto": "^1.5.0"
-  }
+  "bugs": {
+    "url": "https://github.com/internxt/mail-bridge-desktop/issues"
+  },
+  "homepage": "https://github.com/internxt/mail-bridge-desktop#readme"
 }
