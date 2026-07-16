@@ -11,5 +11,6 @@ python3 -m venv .venv
 source .venv/bin/activate
 python3 -m pip install cryptography requests
 ```
-4. Run as administrator (because we need system ports) `sudo python3 mail_server.py`
-5. Add a new account to Apple Mail with email and password. It will fail because the mail server is unknown. Put localhost in both fields:
+4. Run as administrator (because we need system ports) `sudo python3 mail_bridge.py`
+5. Add a new account to Apple Mail: Mail -> Add account -> Add Other Account... -> <fill in email and pwd> sign in -> Fails with unable to verify account name or password & shows more config fields -> Set Incoming Mail Server and Outgoing Mail Server to `localhost` Sign in -> should login in sucessfully
+
