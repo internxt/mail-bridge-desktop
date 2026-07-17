@@ -10,6 +10,7 @@ import logging
 import os
 import sys
 import asyncio
+import base64
  
 import requests
  
@@ -18,6 +19,14 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 MAIL_API_URL = "https://gateway.internxt.com/mail"
 AUTH_API_URL = "https://gateway.internxt.com/drive"
 CRYPTO_BRIDGE_PATH = os.path.join(os.path.dirname(__file__), "crypto_bridge.mjs")
+ENCRYPTED_EMAIL_PREFIX = "INTERNXT-ENCRYPTED-EMAIL-v1"
+
+
+class CryptoBridgeError(RuntimeError):
+    def __init__(self, message: str, code: str | None = None):
+        super().__init__(message)
+        self.code = code
+
 
 async def call_crypto_bridge(payload: dict) -> dict:
     proc = await asyncio.create_subprocess_exec(
@@ -36,7 +45,7 @@ async def call_crypto_bridge(payload: dict) -> dict:
     except json.JSONDecodeError as e:
         raise RuntimeError(f"crypto_bridge.mjs produced unparseable output: {text!r}")     
     if not result.get("ok"):
-        raise RuntimeError(f"crypto_bridge error: {result.get('error')}")
+        raise CryptoBridgeError(f"crypto_bridge error: {result.get('error')}", code=result.get("code"))
     return result
 
 def lookup_public_keys(session, token, addresses: list) -> list:
@@ -91,29 +100,38 @@ async def get_my_decrypted_private_key(store: "MailboxStore") -> str | None:
         log.exception("Failed to fetch/open encryption keystore")
         return None
 
-async def decrypt_mail(store: "MailboxStore", encryption: dict) -> dict:
+async def decrypt_mail(store: "MailboxStore", wrapped_keys: list, encrypted_text: str, encrypted_preview: str, encrypted_session_key: str, version: str = '') -> dict:
     private_key_b64 = await get_my_decrypted_private_key(store)
     if not private_key_b64 or not store.email:
         return {"ok": False, "error": f"no keys available for {store.email}"}
-    wrapped_keys = encryption.get("wrappedKeys")
-    encrypted_text = encryption.get("encryptedPreview")
+    if version == "v1":
+        return {"ok": False, "error": "legacy format (v1), unsupported"}
+    if version == "v2":
+        return {"ok": False, "error": "legacy format (v2), unsupported"}
     if not wrapped_keys or not encrypted_text:
-        return {"ok": False, "error": f"legacy format, wrappedKeys or encryptedPreview are missing"}
+        return {"ok": False, "error": f"legacy format, required fields are missing"}
     try:
         return await call_crypto_bridge({
             "action": "decrypt",
             "encryptedText": encrypted_text,
+            "encryptedPreview": encrypted_preview,
+            "encryptedAttachmentsSessionKey": encrypted_session_key,
             "wrappedKeys": wrapped_keys,
             "secretKey": private_key_b64,
             "myEmail": 'tamara-test@inxt.me', #TODO: change to store.email once account creation works (!!!!!!)
         })
-    except Exception:
-        log.exception("Failed to decrypt mail preview")
+    except CryptoBridgeError as e:
+        if e.code == "NO_WRAPPED_KEY_FOR_RECIPIENT":
+            return {"ok": False, "error": "legacy format - required fields are missing, unsupported"}
+        log.exception("Failed to decrypt mail: %s", e)
+        return {"ok": False, "error": "decrypt failed"}
+    except Exception as e:
+        log.exception("Failed to decrypt mail: %s", e)
         return {"ok": False, "error": "decrypt failed"}
 
-async def generate_attachments_session_key() -> str:
+async def generate_attachments_session_key() -> bytes:
     result = await call_crypto_bridge({"action": "generate_session_key"})
-    return result["sessionKey"]
+    return bytes(result["sessionKey"])
 
 async def encrypt_outgoing_email(store: "MailboxStore", req_body: dict) -> dict:
     addresses = [r["email"] for r in req_body.get("to", [])] + [r["email"] for r in req_body.get("cc", [])]
@@ -125,7 +143,7 @@ async def encrypt_outgoing_email(store: "MailboxStore", req_body: dict) -> dict:
         {"email": r["address"], "publicHybridKey": r["publicKey"]}
         for r in looked_up
     ]
-    attachments_session_key = ""
+    attachments_session_key = None
     if req_body.get("attachments"):
     	attachments_session_key = await generate_attachments_session_key()
    
@@ -143,7 +161,7 @@ async def encrypt_outgoing_email(store: "MailboxStore", req_body: dict) -> dict:
     new_body["encryptedText"] = block["encryptedText"]
     new_body["wrappedKeys"] = block["wrappedKeys"]
     new_body["encryptedPreview"] = block["encryptedPreview"]
-    new_body["previewWrappedKeys"] = block["previewWrappedKeys"]
+    new_body["encryptedAttachmentsSessionKey"] = block["encryptedAttachmentsSessionKey"]
     
     new_body["encryption"] = result["result"]
     return new_body
@@ -326,3 +344,26 @@ def send_email(token: str, body: dict) -> dict:
         resp.raise_for_status()
     return resp.json()
 
+def get_thread(session: requests.Session, token: str, parent_message_id: str) -> list:
+    resp = session.get(
+        f"{MAIL_API_URL}/email/threads/{parent_message_id}",
+        headers=auth_headers(token),
+        timeout=15,
+    )
+    if not resp.ok:
+        print(f"get_thread({parent_message_id}) failed ({resp.status_code}): {resp.text}", file=sys.stderr)
+        resp.raise_for_status()
+    return resp.json()
+
+def parse_encryption_block(text_body: str) -> dict:
+    payload = text_body[len(ENCRYPTED_EMAIL_PREFIX) + 1:]
+    json_str = base64.b64decode(payload).decode("utf-8")
+    parsed = json.loads(json_str)
+    if not isinstance(parsed, dict):
+        raise ValueError(f"encryption block is not an object (got {type(parsed).__name__})")
+    return parsed
+
+def is_encrypted_email_body(text_body: str | None) -> bool:
+    if not text_body:
+        return False
+    return text_body.startswith(f"{ENCRYPTED_EMAIL_PREFIX}\n")

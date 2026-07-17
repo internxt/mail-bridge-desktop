@@ -10,6 +10,6 @@ python3 -m venv .venv
 source .venv/bin/activate
 python3 -m pip install cryptography requests
 ```
-3. Run `npm init -y` and `npm install` to install the dependencies of `crypto-bridge.mjs`
+3. Run `npm install` to install the dependencies of `crypto-bridge.mjs`
 4. Run as administrator (because we need system ports) `sudo python3 mail_server.py`
 5. Add a new account to Apple Mail with email and password. It will fail because the mail server is unknown. Put localhost in both fields:

@@ -16,10 +16,13 @@ import ssl
 import time
 import requests
 import email as email_pkg
+import json
+import requests
 
 from datetime import datetime, timezone
 from email.message import EmailMessage as MimeMessage
 from email.utils import formatdate, make_msgid, getaddresses, parseaddr
+from requests.adapters import HTTPAdapter
 
 
 IDLE_POLL_INTERVAL = 5  # seconds between remote checks while idling
@@ -40,8 +43,13 @@ from internxt_api import (
     list_emails,
     send_email,
     decrypt_mail,
-    encrypt_outgoing_email
+    encrypt_outgoing_email,
+    get_thread,
+    parse_encryption_block,
+    is_encrypted_email_body,
 )
+def _is_html(body: str) -> bool:
+    return bool(re.search(r"<\s*(html|body|div|p|br|table)\b", body, re.IGNORECASE))
 
 async def remote_email_to_message(summary: dict, next_uid: int, store: "MailboxStore") -> dict:
     from_list = summary.get("from") or []
@@ -52,8 +60,13 @@ async def remote_email_to_message(summary: dict, next_uid: int, store: "MailboxS
     to_addr = to_list[0].get("email", "") if to_list else ""
 
     encryption = summary.get("encryption")
-    if encryption:
-        result = await decrypt_mail(store, encryption)
+    if encryption and not isinstance(encryption, dict):
+        subject = f"[encrypted] {summary.get('subject', '')}"
+        body = "[DECRYPTION FAILED: legacy format, not supported]"
+    elif encryption:
+        wrapped_keys = encryption.get("wrappedKeys")
+        encrypted_preview = encryption.get("encryptedPreview")
+        result = await decrypt_mail(store, wrapped_keys, encrypted_preview, encrypted_preview, encrypted_preview)
         if result.get("ok"):
             subject = summary.get("subject", "")
             body = result.get("body", "")
@@ -75,7 +88,11 @@ async def remote_email_to_message(summary: dict, next_uid: int, store: "MailboxS
         dt = datetime.now(timezone.utc)
     msg["Date"] = formatdate(dt.timestamp(), localtime=False)
     msg["Message-ID"] = f"<{summary['id']}@internxt.mail>"
-    msg.set_content(body)
+    if _is_html(body):
+        msg.set_content(body, subtype="html")
+    else:
+        msg.set_content(body)
+
 
     raw = msg.as_bytes()
     return {
@@ -92,7 +109,30 @@ async def remote_email_to_message(summary: dict, next_uid: int, store: "MailboxS
         "date_header": msg["Date"],
         "message_id": msg["Message-ID"],
         "internaldate": dt,
+        "body_loaded": False,
     }
+
+def rebuild_msg_raw(msg: dict, body: str):
+    m = MimeMessage()
+    m["From"] = f'{msg["from_name"]} <{msg["from_addr"]}>'
+    m["To"] = f'{msg["to_name"]} <{msg["to_addr"]}>'
+    m["Subject"] = msg["subject"]
+    m["Date"] = msg["date_header"]
+    m["Message-ID"] = msg["message_id"]
+    if _is_html(body):
+        m.set_content(body, subtype="html")
+    else:
+        m.set_content(body)
+    raw = m.as_bytes()
+    msg["raw"] = raw
+    msg["size"] = len(raw)
+
+
+def item_needs_full_body(item: str) -> bool:
+    key = item.upper()
+    if key in ("RFC822", "RFC822.HEADER", "RFC822.TEXT", "BODYSTRUCTURE", "BODY"):
+        return True
+    return bool(re.match(r"^BODY(\.PEEK)?\[", item, re.IGNORECASE))
 
 
 # ---------------------------------------------------------------------------
@@ -116,6 +156,8 @@ class MailboxStore:
         self.email: str | None = None
         self.get_or_create("INBOX")
         self.get_or_create("Sent")
+        adapter = HTTPAdapter(pool_connections=20, pool_maxsize=20)
+        self.session.mount("https://", adapter)
 
     def _lock_for(self, name: str) -> asyncio.Lock:
         key = name.upper()
@@ -123,6 +165,10 @@ class MailboxStore:
             self._fetch_locks[key] = asyncio.Lock()
         return self._fetch_locks[key]
 
+    def invalidate_auth(self, reason: str = ""):
+        log.warning("Invalidating cached token%s", f": {reason}" if reason else "")
+        self.token = None
+        
     def mark_dirty(self, name: str):
         self.dirty.add(name.upper())
 
@@ -157,8 +203,11 @@ class MailboxStore:
             loop = asyncio.get_running_loop()
             try:
                 summaries = await loop.run_in_executor(None, list_emails, self.session, self.token, remote_type)
-            except Exception:
-                log.exception("Failed to fetch remote emails for %s", display_name)
+            except Exception as e:
+                if is_auth_error(e):
+                    self.invalidate_auth("Token is invalid")
+                else:
+                    log.exception("Failed to fetch remote emails for %s", display_name)
                 return False
             added_any = False
             for s in summaries:
@@ -172,6 +221,61 @@ class MailboxStore:
                 self.bump_revision(display_name)
             self.dirty.discard(display_name.upper())
             return added_any
+    
+    async def ensure_full_body(self, msg: dict):
+        if msg.get("body_loaded"):
+            return
+        remote_id = msg.get("remote_id")
+        if remote_id is None:
+            msg["body_loaded"] = True
+            return
+        lock = self._lock_for(f"body:{remote_id}")
+        async with lock:
+            if msg.get("body_loaded"):
+                return
+            if not self.token:
+                return
+            loop = asyncio.get_running_loop()
+            try:
+                thread = await loop.run_in_executor(None, get_thread, self.session, self.token, remote_id)
+            except Exception as e:
+                if is_auth_error(e):
+                    self.invalidate_auth("Token is invalid")
+                else:
+                    log.exception("Failed to fetch full body for %s", remote_id)
+                return
+            full = next((m for m in thread if m.get("id") == remote_id), None)
+            if full is None:
+                log.error("Message %s not found in its own thread response", remote_id)
+                msg["body_loaded"] = True
+                return
+
+            text_body = full.get("textBody") or ""
+            if is_encrypted_email_body(text_body):
+                try:
+                    encryption = parse_encryption_block(text_body)
+                except Exception:
+                    log.exception("Failed to parse encryption block for %s", remote_id)
+                    body = "[DECRYPTION FAILED: could not parse encryption block]"
+                else:
+                    wrapped_keys = encryption.get("wrappedKeys")
+                    encrypted_text = encryption.get("encryptedText")
+                    version = encryption.get("version")
+                    encrypted_preview = encryption.get("encryptedPreview")
+                    encrypted_session_key = encryption.get("encryptedAttachmentsSessionKey")
+                    result = await decrypt_mail(self, wrapped_keys, encrypted_text, encrypted_preview, encrypted_session_key, version)
+                    if result.get("ok"):
+                        try:
+                            body = json.loads(result.get("body", "")).get("body", "")
+                        except (json.JSONDecodeError, AttributeError):
+                            body = result.get("body", "")
+                    else:
+                        body = f"[DECRYPTION FAILED: {result.get('error')}]"
+            else:
+                body = text_body or full.get("htmlBody") or ""
+
+            rebuild_msg_raw(msg, body)
+            msg["body_loaded"] = True
 
     async def _poll_loop(self):
         log.info("Starting unified remote-mail poller")
@@ -221,6 +325,14 @@ def imap_list_match(pattern: str, name: str) -> bool:
 def stable_uidvalidity(email: str) -> int:
     h = hashlib.sha256(email.encode()).digest()
     return int.from_bytes(h[:4], 'big') & 0x7FFFFFFF 
+
+def is_auth_error(exc: Exception) -> bool:
+    resp = getattr(exc, "response", None)
+    status = getattr(resp, "status_code", None)
+    if status in (401, 403):
+        return True
+    msg = str(exc).lower()
+    return any(k in msg for k in ("401", "unauthorized", "expired", "invalid token", "jwt"))
 
 class Mailbox:
     def __init__(self):
@@ -425,9 +537,6 @@ def expand_fetch_macro(items_spec: str) -> list:
 
 
 def fetch_item_response(msg: dict, item: str):
-    """Returns (name, value) for one FETCH data item, where value is either
-    a plain string or a Literal. Mutates msg['flags'] to add \\Seen for
-    non-.PEEK body fetches, matching real IMAP semantics."""
     key = item.upper()
 
     if key == "FLAGS":
@@ -508,7 +617,7 @@ async def read_command(reader: asyncio.StreamReader, writer: asyncio.StreamWrite
         raw += await reader.readexactly(size)
     return raw.decode("utf-8", errors="replace").rstrip("\r\n")
 
-
+        
 # ---------------------------------------------------------------------------
 # IMAP session (one per connected client)
 # ---------------------------------------------------------------------------
@@ -548,6 +657,13 @@ class IMAPSession:
             return None
         _, mb = self.store.find(self.selected_name)
         return mb
+
+    async def require_valid_token(self, tag: str) -> bool:
+        if self.store.token:
+            return True
+        self.state = "NONAUTH"
+        await self.send(f"{tag} NO [AUTHENTICATIONFAILED] Session expired, please reconnect")
+        return False
 
     async def send(self, line: str):
         log.info("IMAP response: %s", line)
@@ -788,6 +904,8 @@ class IMAPSession:
             return
 
         await self._sync_mailbox_from_remote(display_name, mb)
+        if not await self.require_valid_token(tag):
+            return
 
         await self.send(f"* {mb.exists} EXISTS")
         await self.send(f"* {mb.recent} RECENT")
@@ -816,6 +934,8 @@ class IMAPSession:
             await self.send(f"{tag} NO Mailbox does not exist")
             return
         await self._sync_mailbox_from_remote(display_name, mb)
+        if not await self.require_valid_token(tag):
+            return
         unseen = sum(1 for m in mb.messages if "\\Seen" not in m["flags"])
         await self.send(
             f"* STATUS {display_name} (MESSAGES {mb.exists} RECENT {mb.recent} "
@@ -858,6 +978,14 @@ class IMAPSession:
             uids = [mb.by_seq(s)["uid"] for s in parse_seq_set(seq_spec, max_val) if mb.by_seq(s)]
 
         items = expand_fetch_macro(items_spec)
+        needs_body = any(item_needs_full_body(it) for it in items)
+        if needs_body:
+            msgs = [mb.by_uid(uid) for uid in uids]
+            sem = asyncio.Semaphore(8)
+            async def _bounded(m):
+                async with sem:
+                    await self.store.ensure_full_body(m)
+            await asyncio.gather(*(_bounded(m) for m in msgs))
         for uid in uids:
             msg = mb.by_uid(uid)
             seq = mb.seq_of(uid)
@@ -950,6 +1078,12 @@ class IMAPSession:
         header_part = rest[:m.start()]
         tokens = tokenize(header_part)
         mailbox_name = tokens[0].strip('"') if tokens else "INBOX"
+
+        if mailbox_name.upper() == "SENT":
+            mb = self.store.get_or_create(mailbox_name)
+            log.info("Skipping local APPEND into Sent (already synced from remote)")
+            await self.send(f"{tag} OK [APPENDUID {mb.uidvalidity} {mb.next_uid}] APPEND completed")
+            return
 
         mb = self.store.get_or_create(mailbox_name)
         raw_bytes = payload.encode("utf-8", errors="replace")
@@ -1053,9 +1187,13 @@ def make_smtp_handler(ssl_ctx, store: MailboxStore):
                             if should_encrypt_for(req_body):
                                 req_body = await encrypt_outgoing_email(store, req_body)
                             await loop.run_in_executor(None, send_email, authenticated_token, req_body)
-                        except Exception:
-                            log.exception("Failed to send email via real API")
-                            await send("554 Transaction failed: could not send message")
+                        except Exception as e:
+                            if is_auth_error(e):
+                                store.invalidate_auth("Token is not valid")
+                                await send("530 Authentication required")
+                            else:
+                                log.exception("Failed to send email via real API")
+                                await send("554 Transaction failed: could not send message")
                         else:
                             try:
                                 store.mark_dirty("Sent")

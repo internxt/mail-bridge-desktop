@@ -1,6 +1,13 @@
 // crypto_bridge.mjs
-import { encryptEmailHybrid, encryptEmailHybridForMultipleRecipients, genSymmetricKey, decryptEmailHybrid, openEncryptionKeystore } from 'internxt-crypto'; 
+import { encryptEmailHybridForMultipleRecipients, genSymmetricKey, decryptEmailHybrid, openEncryptionKeystore } from 'internxt-crypto'; 
 
+class NoWrappedKeyError extends Error {
+  constructor(email) {
+    super(`No wrapped key found for recipient: ${email}`);
+    this.name = 'NoWrappedKeyError';
+    this.code = 'NO_WRAPPED_KEY_FOR_RECIPIENT';
+  }
+}
 
 function b64ToBytes(b64) {
   return new Uint8Array(Buffer.from(b64, 'base64'));
@@ -17,12 +24,12 @@ async function readStdin() {
 
 export const ENCRYPTED_EMAIL_PREFIX = 'INTERNXT-ENCRYPTED-EMAIL-v1';
 
-async function decryptForMe(wrappedKeys, ciphertextB64, secretKeyBytes, myEmail) {
+async function decryptForMe(wrappedKeys, encText, encPreview, encAttachmentsSessionKey, secretKeyBytes, myEmail) {
   const normalized = myEmail.toLowerCase();
   const mine = wrappedKeys.find(w => w.encryptedForEmail?.toLowerCase() === normalized);
-  if (!mine) throw new Error('No wrapped key found for this recipient');
-  const encEmail = { encryptedKey: mine, encEmail: { encText: ciphertextB64 } };
-  return decryptEmailHybrid(encEmail, secretKeyBytes);
+  if (!mine) throw new NoWrappedKeyError(myEmail);
+  return decryptEmailHybrid({ encText, encPreview, encAttachmentsSessionKey }, mine, secretKeyBytes);
+
 }
 
 async function main() {
@@ -48,9 +55,9 @@ async function main() {
 
       const secretKeyBytes = b64ToBytes(input.secretKey);
 
-      const {text} = await decryptForMe(input.wrappedKeys, input.encryptedText, secretKeyBytes, input.myEmail);
+      const {text, preview, attachmentsSessionKey} = await decryptForMe(input.wrappedKeys, input.encryptedText, input.encryptedPreview, input.encryptedAttachmentsSessionKey, secretKeyBytes, input.myEmail);
 
-      process.stdout.write(JSON.stringify({ ok: true, body: text }));
+      process.stdout.write(JSON.stringify({ ok: true, body: text, preview, attachmentsSessionKey }));
        
     } else if (input.action === 'encrypt') {
       if (!input.recipients || input.recipients.length === 0) {
@@ -61,35 +68,37 @@ async function main() {
         email: r.email,
         publicHybridKey: b64ToBytes(r.publicHybridKey),
       }));
-      const bodyPayload = {
-        body: input.email.text,
-        attachmentsSessionKey: input.attachmentsSessionKey ?? '',
+      const email = {
+        text: input.email.text,
+        preview: input.preview,
+        attachmentsSessionKey: input.attachmentsSessionKey ?? new Uint8Array(),
       };
 
-      const [encryptedBodies, encryptedPreviews] = await Promise.all([
-        encryptEmailHybridForMultipleRecipients({ text: JSON.stringify(bodyPayload) }, recipients),
-        encryptEmailHybridForMultipleRecipients({ text: input.previewText ?? ' ' }, recipients),
-      ]);
+      const { encryptedKeys, encEmail } = await
+        encryptEmailHybridForMultipleRecipients(email, recipients);
 
       const result = {
-        version: 'v2',
-        encryptedText: encryptedBodies[0].encEmail.encText,
-        wrappedKeys: encryptedBodies.map(e => e.encryptedKey),
-        encryptedPreview: encryptedPreviews[0].encEmail.encText,
-        previewWrappedKeys: encryptedPreviews.map(e => e.encryptedKey),
+        version: 'v3',
+        encryptedText: encEmail.encText,
+        wrappedKeys: encryptedKeys,
+        encryptedPreview: encEmail.encPreview,
+        encryptedAttachmentsSessionKey: encEmail.encAttachmentsSessionKey,
       };
       process.stdout.write(JSON.stringify({ ok: true, result }));
     } else if (input.action === 'generate_session_key') {
       const key = genSymmetricKey();
-      process.stdout.write(JSON.stringify({ ok: true, sessionKey: bytesToB64(key) }));
+      process.stdout.write(JSON.stringify({ ok: true, sessionKey: key }));
      }
      else {
       process.stdout.write(JSON.stringify({ ok: false, error: `unknown action: ${input.action}` }));
       process.exit(1);
     }
   } catch (err) {
-    process.stdout.write(JSON.stringify({ ok: false, error: err instanceof Error ? err.message : String(err) }));
-    process.exit(1);
+    process.stdout.write(JSON.stringify({
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+      code: err?.code ?? null,
+    })); process.exit(1);
   }
 }
 
