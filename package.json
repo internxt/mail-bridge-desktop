@@ -1,0 +1,9 @@
+{
+  "name": "mail-bridge-crypto",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "internxt-crypto": "1.6.0"
+  }
+}
