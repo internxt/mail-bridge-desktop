@@ -20,6 +20,7 @@ MAIL_API_URL = "https://gateway.internxt.com/mail"
 AUTH_API_URL = "https://gateway.internxt.com/drive"
 CRYPTO_BRIDGE_PATH = os.path.join(os.path.dirname(__file__), "crypto_bridge.mjs")
 ENCRYPTED_EMAIL_PREFIX = "INTERNXT-ENCRYPTED-EMAIL-v1"
+TIME_OUT_AFTER_SECONDS = 15
 
 
 class CryptoBridgeError(RuntimeError):
@@ -53,7 +54,7 @@ def lookup_public_keys(session, token, addresses: list) -> list:
         f"{MAIL_API_URL}/email/keys/lookup",
         json={"addresses": addresses},
         headers=auth_headers(token),
-        timeout=15,
+        timeout=TIME_OUT_AFTER_SECONDS,
     )
     if not resp.ok:
         log.error("lookup_public_keys failed (%s): %s", resp.status_code, resp.text)
@@ -65,7 +66,7 @@ def download_keystore(session: requests.Session, token: str, user_email: str, ke
         f"{MAIL_API_URL}/users/me/mail-account/keys",
         params={"userEmail": user_email, "keystoreType": keystore_type},
         headers=auth_headers(token),
-        timeout=15,
+        timeout=TIME_OUT_AFTER_SECONDS,
     )
     if not resp.ok:
         log.error("download_keystore failed (%s): %s", resp.status_code, resp.text)
@@ -273,7 +274,7 @@ def security_details(session: requests.Session, email: str) -> dict:
         f"{AUTH_API_URL}/auth/login",
         json={"email": email},
         headers=basic_headers(),
-        timeout=15,
+        timeout=TIME_OUT_AFTER_SECONDS,
     )
     if not resp.ok:
         print(f"security_details failed ({resp.status_code}): {resp.text}", file=sys.stderr)
@@ -303,7 +304,7 @@ def login(session: requests.Session, email: str, password: str) -> dict:
         f"{AUTH_API_URL}/auth/login/access",
         json=body,
         headers=basic_headers(),
-        timeout=15,
+        timeout=TIME_OUT_AFTER_SECONDS,
     )
     if not resp.ok:
         print(f"Login failed ({resp.status_code}): {resp.text}", file=sys.stderr)
@@ -328,7 +329,7 @@ def list_emails(session: requests.Session, token: str, mailbox: str, limit: int 
         f"{MAIL_API_URL}/email",
         params={"mailbox": mailbox, "limit": limit, "position": position},
         headers=auth_headers(token),
-        timeout=15,
+        timeout=TIME_OUT_AFTER_SECONDS,
     )
     if not resp.ok:
         print(f"list_emails({mailbox}) failed ({resp.status_code}): {resp.text}", file=sys.stderr)
@@ -338,7 +339,7 @@ def list_emails(session: requests.Session, token: str, mailbox: str, limit: int 
 
 
 def send_email(token: str, body: dict) -> dict:
-    resp = requests.post(f"{MAIL_API_URL}/email/send", json=body, headers=auth_headers(token), timeout=15)
+    resp = requests.post(f"{MAIL_API_URL}/email/send", json=body, headers=auth_headers(token), timeout=TIME_OUT_AFTER_SECONDS)
     if not resp.ok:
         log.error("send_email failed (%s): %s", resp.status_code, resp.text)
         resp.raise_for_status()
@@ -348,7 +349,7 @@ def get_thread(session: requests.Session, token: str, parent_message_id: str) ->
     resp = session.get(
         f"{MAIL_API_URL}/email/threads/{parent_message_id}",
         headers=auth_headers(token),
-        timeout=15,
+        timeout=TIME_OUT_AFTER_SECONDS,
     )
     if not resp.ok:
         print(f"get_thread({parent_message_id}) failed ({resp.status_code}): {resp.text}", file=sys.stderr)
@@ -367,3 +368,48 @@ def is_encrypted_email_body(text_body: str | None) -> bool:
     if not text_body:
         return False
     return text_body.startswith(f"{ENCRYPTED_EMAIL_PREFIX}\n")
+
+def download_attachment(session: requests.Session, token: str, mail_id: str, blob_id: str, name: str | None = None, type_: str | None = None) -> bytes:
+    params = {}
+    if name:
+        params["name"] = name
+    if type_:
+        params["type"] = type_
+    resp = session.get(
+        f"{MAIL_API_URL}/email/{mail_id}/attachment/{blob_id}",
+        params=params,
+        headers=auth_headers(token),
+        timeout=TIME_OUT_AFTER_SECONDS,
+    )
+    if not resp.ok:
+        log.error("download_attachment failed (%s): %s", resp.status_code, resp.text)
+        resp.raise_for_status()
+    return resp.content
+
+def delete_email(session: requests.Session, token: str, email_id: str) -> None:
+    resp = session.delete(
+        f"{MAIL_API_URL}/email/{email_id}",
+        headers=auth_headers(token),
+        timeout=TIME_OUT_AFTER_SECONDS,
+    )
+    if not resp.ok:
+        log.error("delete_email(%s) failed (%s): %s", email_id, resp.status_code, resp.text)
+        resp.raise_for_status()
+
+def update_email(session: requests.Session, token: str, email_id: str, mailbox: str | None = None, is_read: bool | None = None, is_flagged: bool | None = None) -> None:
+    body = {}
+    if mailbox is not None:
+        body["mailbox"] = mailbox
+    if is_read is not None:
+        body["isRead"] = is_read
+    if is_flagged is not None:
+        body["isFlagged"] = is_flagged
+    resp = session.patch(
+        f"{MAIL_API_URL}/email/{email_id}",
+        json=body,
+        headers=auth_headers(token),
+        timeout=TIME_OUT_AFTER_SECONDS,
+    )
+    if not resp.ok:
+        log.error("update_email(%s) failed (%s): %s", email_id, resp.status_code, resp.text)
+        resp.raise_for_status()

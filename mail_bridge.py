@@ -17,7 +17,6 @@ import time
 import requests
 import email as email_pkg
 import json
-import requests
 
 from datetime import datetime, timezone
 from email.message import EmailMessage as MimeMessage
@@ -37,6 +36,13 @@ SPECIAL_USE = {
     "JUNK": "\\Junk",
     "ARCHIVE": "\\Archive",
 }
+REMOTE_TYPE_BY_MAILBOX = {
+    "INBOX": "inbox",
+    "SENT": "sent",
+    "TRASH": "trash",
+    "JUNK": "spam",
+}
+REMOVAL_MAILBOXES = ("Trash", "Junk")
 
 from internxt_api import (
     login,
@@ -47,6 +53,9 @@ from internxt_api import (
     get_thread,
     parse_encryption_block,
     is_encrypted_email_body,
+    download_attachment,
+    delete_email,
+    update_email,
 )
 def _is_html(body: str) -> bool:
     return bool(re.search(r"<\s*(html|body|div|p|br|table)\b", body, re.IGNORECASE))
@@ -112,7 +121,7 @@ async def remote_email_to_message(summary: dict, next_uid: int, store: "MailboxS
         "body_loaded": False,
     }
 
-def rebuild_msg_raw(msg: dict, body: str):
+def rebuild_msg_raw(msg: dict, body: str, attachments: list | None = None):
     m = MimeMessage()
     m["From"] = f'{msg["from_name"]} <{msg["from_addr"]}>'
     m["To"] = f'{msg["to_name"]} <{msg["to_addr"]}>'
@@ -123,6 +132,9 @@ def rebuild_msg_raw(msg: dict, body: str):
         m.set_content(body, subtype="html")
     else:
         m.set_content(body)
+    for att_name, att_type, att_bytes in (attachments or []):
+        maintype, _, subtype = (att_type or "application/octet-stream").partition("/")
+        m.add_attachment(att_bytes, maintype=maintype or "application", subtype=subtype or "octet-stream", filename=att_name)
     raw = m.as_bytes()
     msg["raw"] = raw
     msg["size"] = len(raw)
@@ -158,6 +170,9 @@ class MailboxStore:
         self.get_or_create("Sent")
         adapter = HTTPAdapter(pool_connections=20, pool_maxsize=20)
         self.session.mount("https://", adapter)
+        self.get_or_create("Trash")
+        self.get_or_create("Drafts")
+        self.get_or_create("Junk")
 
     def _lock_for(self, name: str) -> asyncio.Lock:
         key = name.upper()
@@ -209,9 +224,17 @@ class MailboxStore:
                 else:
                     log.exception("Failed to fetch remote emails for %s", display_name)
                 return False
+            elsewhere_ids = set()
+            for special_name in REMOVAL_MAILBOXES:
+                if display_name.upper() == special_name.upper():
+                    continue
+                _, special_mb = self.find(special_name)
+                if special_mb is not None:
+                    elsewhere_ids |= special_mb._remote_ids
             added_any = False
             for s in summaries:
-                if mb.has_remote_id(s.get("id")):
+                remote_id = s.get("id")
+                if mb.has_remote_id(remote_id) or remote_id in elsewhere_ids:
                     continue
                 msg_dict = await remote_email_to_message(s, mb.next_uid, self)
                 uid = mb.add_remote_message(msg_dict, True)
@@ -221,7 +244,40 @@ class MailboxStore:
                 self.bump_revision(display_name)
             self.dirty.discard(display_name.upper())
             return added_any
-    
+
+    async def sync_removed_and_reconcile(self):
+        if not self.token:
+            return
+        newly_elsewhere = set()
+        for special_name in REMOVAL_MAILBOXES:
+            remote_type = REMOTE_TYPE_BY_MAILBOX[special_name.upper()]
+            _, special_mb = self.find(special_name)
+            if special_mb is None:
+                continue
+            before_ids = set(special_mb._remote_ids)
+            await self.fetch_and_merge(special_name, remote_type)
+            newly_elsewhere |= (special_mb._remote_ids - before_ids)
+        if not newly_elsewhere:
+            return
+        for name in self.names():
+            if name.upper() in (m.upper() for m in REMOVAL_MAILBOXES):
+                continue
+            _, mb = self.find(name)
+            if mb is None:
+                continue
+            removed = False
+            for msg in list(mb.messages):
+                remote_id = msg.get("remote_id")
+                if remote_id in newly_elsewhere:
+                    seq = mb.seq_of(msg["uid"])
+                    mb.messages.remove(msg)
+                    mb._remote_ids.discard(remote_id)
+                    if seq is not None:
+                        mb.pending_expunges.append(seq)
+                    removed = True
+            if removed:
+                self.bump_revision(name)
+
     async def ensure_full_body(self, msg: dict):
         if msg.get("body_loaded"):
             return
@@ -274,7 +330,23 @@ class MailboxStore:
             else:
                 body = text_body or full.get("htmlBody") or ""
 
-            rebuild_msg_raw(msg, body)
+            attachments_data = []
+            for att in full.get("attachments") or []:
+                blob_id = att.get("blobId")
+                if not blob_id:
+                    continue
+                try:
+                    data = await loop.run_in_executor(
+                        None, download_attachment, self.session, self.token, remote_id, blob_id, att.get("name"), att.get("type"),
+                    )
+                except Exception:
+                    log.exception("Failed to download attachment %s for %s", blob_id, remote_id)
+                    continue
+                if is_encrypted_email_body(text_body):
+                    # TODO: decrypt via attachmentsSessionKey from the envelope
+                    continue
+                attachments_data.append((att.get("name", "attachment"), att.get("type", "application/octet-stream"), data))
+            rebuild_msg_raw(msg, body, attachments_data)
             msg["body_loaded"] = True
 
     async def _poll_loop(self):
@@ -286,9 +358,10 @@ class MailboxStore:
                     continue
                 active = list(self._active_idlers)
                 for display_name in active:
-                    remote_type = {"INBOX": "inbox", "SENT": "sent"}.get(display_name)
+                    remote_type = REMOTE_TYPE_BY_MAILBOX.get(display_name)
                     if remote_type:
                         await self.fetch_and_merge(display_name, remote_type)
+                await self.sync_removed_and_reconcile()
         except asyncio.CancelledError:
             log.info("Poller cancelled")
             raise
@@ -341,6 +414,7 @@ class Mailbox:
         self.messages: list = []
         self.recent_uids: set = set()
         self._remote_ids: set = set()
+        self.pending_expunges: list = []
 
     def has_remote_id(self, remote_id: str) -> bool:
         return remote_id in self._remote_ids
@@ -636,7 +710,7 @@ class IMAPSession:
 
     async def _sync_mailbox_from_remote(self, display_name: str, mb: "Mailbox", force: bool = False):
         key = display_name.upper()
-        remote_type = {"INBOX": "inbox", "SENT": "sent"}.get(key)
+        remote_type = REMOTE_TYPE_BY_MAILBOX.get(key)
         if remote_type is None:
             return
         last = self.store.last_synced_at.get(key)
@@ -776,6 +850,9 @@ class IMAPSession:
 
                 current_revision = self.store.revision(display_name)
                 if current_revision != start_revision:
+                    while mb.pending_expunges:
+                        seq = mb.pending_expunges.pop(0)
+                        await self.send(f"* {seq} EXPUNGE")
                     await self.send(f"* {mb.exists} EXISTS")
                     await self.send(f"* {mb.recent} RECENT")
                     start_revision = current_revision
@@ -900,6 +977,7 @@ class IMAPSession:
         requested = tokens[0].strip('"') if tokens else ""
         display_name, mb = self.store.find(requested)
         if mb is None:
+            log.warning("SELECT requested unknown mailbox: %r (known: %s)", requested, self.store.names())
             await self.send(f"{tag} NO Mailbox does not exist")
             return
 
@@ -931,6 +1009,7 @@ class IMAPSession:
         name = tokens[0].strip('"') if tokens else "INBOX"
         display_name, mb = self.store.find(name)
         if mb is None:
+            log.warning("SELECT requested unknown mailbox: %r (known: %s)", name, self.store.names())
             await self.send(f"{tag} NO Mailbox does not exist")
             return
         await self._sync_mailbox_from_remote(display_name, mb)
@@ -950,14 +1029,40 @@ class IMAPSession:
             return
         self.store.get_or_create(tokens[0].strip('"'))
         await self.send(f"{tag} OK CREATE completed")
-
-    async def cmd_close(self, tag, rest):
+    
+    async def _expunge(self, tag, rest, send_responses: bool):
         if self.state != "SELECTED":
             await self.send(f"{tag} BAD No mailbox selected")
             return
-        self.mailbox.messages = [m for m in self.mailbox.messages if "\\Deleted" not in m["flags"]]
+        mb = self.mailbox
+        to_remove = [m for m in mb.messages if "\\Deleted" in m["flags"]]
+        loop = asyncio.get_running_loop()
+        for msg in to_remove:
+            remote_id = msg.get("remote_id")
+            if remote_id and self.store.token:
+                try:
+                    await loop.run_in_executor(None, delete_email, self.store.session, self.store.token, remote_id)
+                except Exception as e:
+                    if is_auth_error(e):
+                        self.store.invalidate_auth("Token is invalid")
+                    else:
+                        log.exception("Failed to delete remote email %s", remote_id)
+                    continue
+            seq = mb.seq_of(msg["uid"])
+            mb.messages.remove(msg)
+            if remote_id:
+                mb._remote_ids.discard(remote_id)
+            if send_responses and seq is not None:
+                await self.send(f"* {seq} EXPUNGE")
+        self.store.bump_revision(self.selected_name)
+        await self.send(f"{tag} OK {'EXPUNGE' if send_responses else 'CLOSE'} completed")
+
+    async def cmd_close(self, tag, rest):
+        await self._expunge(tag, rest, send_responses=False)
         self.state = "AUTH"
-        await self.send(f"{tag} OK CLOSE completed")
+
+    async def cmd_expunge(self, tag, rest):
+        await self._expunge(tag, rest, send_responses=True)
 
     async def cmd_fetch(self, tag, rest, use_uid=False):
         if self.state != "SELECTED":
@@ -1060,9 +1165,52 @@ class IMAPSession:
         elif sub == "SEARCH":
             await self.cmd_search(tag, sub_rest, use_uid=True)
         elif sub == "COPY":
-            await self.send(f"{tag} OK UID COPY completed (no-op)")
+            await self.cmd_uid_copy(tag, sub_rest)
         else:
             await self.send(f"{tag} BAD Unsupported UID subcommand")
+
+    async def cmd_uid_copy(self, tag, rest):
+        if self.state != "SELECTED":
+            await self.send(f"{tag} BAD No mailbox selected")
+            return
+        tokens = tokenize(rest)
+        if len(tokens) < 2:
+            await self.send(f"{tag} BAD UID COPY needs a sequence set and destination mailbox")
+            return
+        seq_spec, dest_name = tokens[0], tokens[1].strip('"')
+        mb = self.mailbox
+        max_val = mb.next_uid - 1
+        uids = [u for u in parse_seq_set(seq_spec, max_val) if mb.by_uid(u)]
+
+        dest_key = dest_name.upper()
+        if dest_key not in ("TRASH", "JUNK"):
+            await self.send(f"{tag} OK UID COPY completed (no-op)")
+            return
+
+        loop = asyncio.get_running_loop()
+        for uid in uids:
+            msg = mb.by_uid(uid)
+            remote_id = msg.get("remote_id") if msg else None
+            if not remote_id or not self.store.token:
+                continue
+            try:
+                if dest_key == "TRASH":
+                    await loop.run_in_executor(None, delete_email, self.store.session, self.store.token, remote_id)
+                else:
+                    await loop.run_in_executor(None, update_email, self.store.session, self.store.token, remote_id, "spam")  
+            except Exception as e:
+                if is_auth_error(e):
+                    self.store.invalidate_auth("Token is invalid")
+                else:
+                    log.exception("Failed to move %s to %s via UID COPY", remote_id, dest_key.lower())
+                continue
+            seq = mb.seq_of(uid)
+            mb.messages.remove(msg)
+            mb._remote_ids.discard(remote_id)
+            if seq is not None:
+                mb.pending_expunges.append(seq)
+        self.store.bump_revision(self.selected_name)
+        await self.send(f"{tag} OK UID COPY completed")
 
     async def cmd_append(self, tag, rest):
         if self.state == "NONAUTH":
