@@ -56,6 +56,7 @@ from internxt_api import (
     download_attachment,
     delete_email,
     update_email,
+    decrypt_attachment,
 )
 def _is_html(body: str) -> bool:
     return bool(re.search(r"<\s*(html|body|div|p|br|table)\b", body, re.IGNORECASE))
@@ -77,6 +78,7 @@ async def remote_email_to_message(summary: dict, next_uid: int, store: "MailboxS
         encrypted_preview = encryption.get("encryptedPreview")
         result = await decrypt_mail(store, wrapped_keys, encrypted_preview, encrypted_preview, encrypted_preview)
         if result.get("ok"):
+            attachments_session_key = result.get("attachmentsSessionKey")
             subject = summary.get("subject", "")
             body = result.get("body", "")
         else:
@@ -307,6 +309,7 @@ class MailboxStore:
                 return
 
             text_body = full.get("textBody") or ""
+            attachments_session_key = None
             if is_encrypted_email_body(text_body):
                 try:
                     encryption = parse_encryption_block(text_body)
@@ -321,6 +324,7 @@ class MailboxStore:
                     encrypted_session_key = encryption.get("encryptedAttachmentsSessionKey")
                     result = await decrypt_mail(self, wrapped_keys, encrypted_text, encrypted_preview, encrypted_session_key, version)
                     if result.get("ok"):
+                        attachments_session_key = result.get("attachmentsSessionKey")
                         try:
                             body = json.loads(result.get("body", "")).get("body", "")
                         except (json.JSONDecodeError, AttributeError):
@@ -343,8 +347,14 @@ class MailboxStore:
                     log.exception("Failed to download attachment %s for %s", blob_id, remote_id)
                     continue
                 if is_encrypted_email_body(text_body):
-                    # TODO: decrypt via attachmentsSessionKey from the envelope
-                    continue
+                    if not attachments_session_key:
+                        log.warning("No attachments session key for %s; skipping %s", remote_id, blob_id)
+                        continue
+                    try:
+                        data = await decrypt_attachment(attachments_session_key, data)
+                    except Exception:
+                        log.exception("Failed to decrypt attachment %s for %s", blob_id, remote_id)
+                        continue
                 attachments_data.append((att.get("name", "attachment"), att.get("type", "application/octet-stream"), data))
             rebuild_msg_raw(msg, body, attachments_data)
             msg["body_loaded"] = True
@@ -1115,7 +1125,6 @@ class IMAPSession:
         seq_spec, action = tokens[0], tokens[1].upper()
         flags = tokenize(" ".join(tokens[2:]).strip("()"))
         mb = self.mailbox
-
         if use_uid:
             max_val = mb.next_uid - 1
             uids = [u for u in parse_seq_set(seq_spec, max_val) if mb.by_uid(u)]
@@ -1125,12 +1134,26 @@ class IMAPSession:
 
         for uid in uids:
             msg = mb.by_uid(uid)
+            was_seen = "\\Seen" in msg["flags"]
             if action.startswith("+"):
                 msg["flags"].update(flags)
             elif action.startswith("-"):
                 msg["flags"].difference_update(flags)
             else:
                 msg["flags"] = set(flags)
+            now_seen = "\\Seen" in msg["flags"]
+            remote_id = msg.get("remote_id")
+            if now_seen != was_seen and remote_id and self.store.token:
+                try:
+                    await asyncio.to_thread(
+                        update_email, self.store.session, self.store.token,
+                        remote_id, is_read=now_seen)
+                except Exception as e:
+                    if is_auth_error(e):
+                        self.store.invalidate_auth("Token is invalid")
+                    else:
+                        log.exception("Failed to sync isRead for %s", remote_id)
+
             if "SILENT" not in action:
                 seq = mb.seq_of(uid)
                 await self.send_fetch_line(seq, [("FLAGS", f'({" ".join(sorted(msg["flags"]))})')])

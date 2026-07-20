@@ -413,3 +413,10 @@ def update_email(session: requests.Session, token: str, email_id: str, mailbox: 
     if not resp.ok:
         log.error("update_email(%s) failed (%s): %s", email_id, resp.status_code, resp.text)
         resp.raise_for_status()
+async def decrypt_attachment(session_key_b64: str, encrypted_data: bytes) -> bytes:
+    result = await call_crypto_bridge({
+        "action": "decrypt_attachment",
+        "sessionKey": session_key_b64,
+        "data": base64.b64encode(encrypted_data).decode("ascii"),
+    })
+    return base64.b64decode(result["data"])

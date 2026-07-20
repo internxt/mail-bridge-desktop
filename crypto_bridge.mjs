@@ -1,5 +1,5 @@
 // crypto_bridge.mjs
-import { encryptEmailHybridForMultipleRecipients, genSymmetricKey, decryptEmailHybrid, openEncryptionKeystore } from 'internxt-crypto'; 
+import { encryptEmailHybridForMultipleRecipients, genSymmetricKey, decryptSymmetrically, decryptEmailHybrid, openEncryptionKeystore } from 'internxt-crypto'; 
 
 class NoWrappedKeyError extends Error {
   constructor(email) {
@@ -57,7 +57,12 @@ async function main() {
 
       const {text, preview, attachmentsSessionKey} = await decryptForMe(input.wrappedKeys, input.encryptedText, input.encryptedPreview, input.encryptedAttachmentsSessionKey, secretKeyBytes, input.myEmail);
 
-      process.stdout.write(JSON.stringify({ ok: true, body: text, preview, attachmentsSessionKey }));
+      process.stdout.write(JSON.stringify({
+        ok: true,
+        body: text,
+        preview,
+        attachmentsSessionKey: attachmentsSessionKey?.length ? bytesToB64(attachmentsSessionKey) : null,
+      }));
        
     } else if (input.action === 'encrypt') {
       if (!input.recipients || input.recipients.length === 0) {
@@ -88,6 +93,12 @@ async function main() {
     } else if (input.action === 'generate_session_key') {
       const key = genSymmetricKey();
       process.stdout.write(JSON.stringify({ ok: true, sessionKey: key }));
+     } else if (input.action === 'decrypt_attachment') {
+        const plaintext = await decryptSymmetrically(
+        b64ToBytes(input.sessionKey),
+        b64ToBytes(input.data),
+      );
+      process.stdout.write(JSON.stringify({ ok: true, data: bytesToB64(plaintext) }));
      }
      else {
       process.stdout.write(JSON.stringify({ ok: false, error: `unknown action: ${input.action}` }));
