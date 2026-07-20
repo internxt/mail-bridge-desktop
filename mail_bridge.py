@@ -54,6 +54,7 @@ from internxt_api import (
     parse_encryption_block,
     is_encrypted_email_body,
     download_attachment,
+    upload_plain_attachments,
     delete_email,
     update_email,
     decrypt_attachment,
@@ -161,13 +162,13 @@ class MailboxStore:
         self.last_synced_at: dict = {}
         self._poller_task: asyncio.Task | None = None
         self._poller_lock = asyncio.Lock()
-        self._active_idlers: set = set() 
         self._fetch_locks: dict = {}
         self.session = requests.Session()
         self.mnemonic: str | None = None
         self._cached_private_key: str | None = None
         self.token: str | None = None
         self.email: str | None = None
+        self._keystore_lock = asyncio.Lock()
         self.get_or_create("INBOX")
         self.get_or_create("Sent")
         adapter = HTTPAdapter(pool_connections=20, pool_maxsize=20)
@@ -188,12 +189,6 @@ class MailboxStore:
         
     def mark_dirty(self, name: str):
         self.dirty.add(name.upper())
-
-    def register_idler(self, display_name: str):
-        self._active_idlers.add(display_name.upper())
-
-    def unregister_idler(self, display_name: str):
-        self._active_idlers.discard(display_name.upper())
 
     def bump_revision(self, name: str):
         key = name.upper()
@@ -217,9 +212,8 @@ class MailboxStore:
             _, mb = self.find(display_name)
             if mb is None:
                 return False
-            loop = asyncio.get_running_loop()
             try:
-                summaries = await loop.run_in_executor(None, list_emails, self.session, self.token, remote_type)
+                summaries = await asyncio.to_thread(list_emails, self.session, self.token, remote_type)
             except Exception as e:
                 if is_auth_error(e):
                     self.invalidate_auth("Token is invalid")
@@ -233,16 +227,36 @@ class MailboxStore:
                 _, special_mb = self.find(special_name)
                 if special_mb is not None:
                     elsewhere_ids |= special_mb._remote_ids
+            remote_ids_now = {s.get("id") for s in summaries}
             added_any = False
+            changed = False
             for s in summaries:
                 remote_id = s.get("id")
-                if mb.has_remote_id(remote_id) or remote_id in elsewhere_ids:
+                if remote_id in elsewhere_ids:
                     continue
+                if mb.has_remote_id(remote_id):
+                    existing = next((m for m in mb.messages if m.get("remote_id") == remote_id), None)
+                    if existing is not None:
+                        remote_seen = bool(s.get("isRead"))
+                        if remote_seen != ("\\Seen" in existing["flags"]):
+                            (existing["flags"].add if remote_seen else existing["flags"].discard)("\\Seen")
+                            mb.pending_flag_uids.append(existing["uid"])
+                            changed = True
                 msg_dict = await remote_email_to_message(s, mb.next_uid, self)
                 uid = mb.add_remote_message(msg_dict, True)
                 if uid is not None:
                     added_any = True
-            if added_any:
+            for msg in list(mb.messages):
+                rid = msg.get("remote_id")
+                if rid is None or rid in remote_ids_now:
+                    continue
+                seq = mb.seq_of(msg["uid"])
+                mb.messages.remove(msg)
+                mb._remote_ids.discard(rid)
+                if seq is not None:
+                    mb.pending_expunges.append(seq)
+                changed = True
+            if added_any or changed:
                 self.bump_revision(display_name)
             self.dirty.discard(display_name.upper())
             return added_any
@@ -293,9 +307,8 @@ class MailboxStore:
                 return
             if not self.token:
                 return
-            loop = asyncio.get_running_loop()
             try:
-                thread = await loop.run_in_executor(None, get_thread, self.session, self.token, remote_id)
+                thread = await asyncio.to_thread(get_thread, self.session, self.token, remote_id)
             except Exception as e:
                 if is_auth_error(e):
                     self.invalidate_auth("Token is invalid")
@@ -340,8 +353,8 @@ class MailboxStore:
                 if not blob_id:
                     continue
                 try:
-                    data = await loop.run_in_executor(
-                        None, download_attachment, self.session, self.token, remote_id, blob_id, att.get("name"), att.get("type"),
+                    data = await asyncio.to_thread(
+                        download_attachment, self.session, self.token, remote_id, blob_id, att.get("name"), att.get("type"),
                     )
                 except Exception:
                     log.exception("Failed to download attachment %s for %s", blob_id, remote_id)
@@ -366,11 +379,9 @@ class MailboxStore:
                 await asyncio.sleep(IDLE_POLL_INTERVAL)
                 if not self.token:
                     continue
-                active = list(self._active_idlers)
-                for display_name in active:
-                    remote_type = REMOTE_TYPE_BY_MAILBOX.get(display_name)
-                    if remote_type:
-                        await self.fetch_and_merge(display_name, remote_type)
+                await asyncio.gather(*(
+                    self.fetch_and_merge(name, remote_type)
+                    for name, remote_type in REMOTE_TYPE_BY_MAILBOX.items()))
                 await self.sync_removed_and_reconcile()
         except asyncio.CancelledError:
             log.info("Poller cancelled")
@@ -425,6 +436,7 @@ class Mailbox:
         self.recent_uids: set = set()
         self._remote_ids: set = set()
         self.pending_expunges: list = []
+        self.pending_flag_uids: list = []
 
     def has_remote_id(self, remote_id: str) -> bool:
         return remote_id in self._remote_ids
@@ -826,7 +838,6 @@ class IMAPSession:
         mb = self.mailbox
         display_name = self.selected_name
         await self.store.ensure_poller_running()
-        self.store.register_idler(display_name)
         log.info("IDLE started for %s", display_name)
 
         done_event = asyncio.Event()
@@ -865,9 +876,17 @@ class IMAPSession:
                         await self.send(f"* {seq} EXPUNGE")
                     await self.send(f"* {mb.exists} EXISTS")
                     await self.send(f"* {mb.recent} RECENT")
+                    while mb.pending_flag_uids:
+                        uid = mb.pending_flag_uids.pop(0)
+                        fmsg = mb.by_uid(uid)
+                        seq = mb.seq_of(uid) if fmsg else None
+                        if seq is not None:
+                            await self.send_fetch_line(seq, [
+                                ("UID", str(uid)),
+                                ("FLAGS", f'({" ".join(sorted(fmsg["flags"]))})'),
+                            ])
                     start_revision = current_revision
         finally:
-            self.store.unregister_idler(display_name)
             if not watcher.done():
                 watcher.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
@@ -894,15 +913,21 @@ class IMAPSession:
         await self.send(f"{tag} OK THREAD completed")
 
     async def cmd_namespace(self, tag, rest):
-        await self.send(f"{tag} BAD Unknown command")
+        await self.send('* NAMESPACE (("" "/")) NIL NIL')
+        await self.send(f"{tag} OK NAMESPACE completed")
 
     async def cmd_starttls(self, tag, rest):
         await self.send(f"{tag} OK Begin TLS negotiation")
         loop = asyncio.get_running_loop()
-        new_transport = await loop.start_tls(
-            self.writer.transport, self.writer.transport.get_protocol(),
-            self.ssl_ctx, server_side=True,
-        )
+        try: 
+            new_transport = await loop.start_tls(
+                self.writer.transport, self.writer.transport.get_protocol(),
+                self.ssl_ctx, server_side=True,
+            )
+        except Exception:
+            log.exception("STARTTLS handshake failed for %s", self.peer)
+            self.writer.close()
+            return
         self.writer._transport = new_transport
 
     async def cmd_logout(self, tag, rest):
@@ -931,10 +956,8 @@ class IMAPSession:
             await self.store.ensure_poller_running()
             await self.send(f"{tag} OK LOGIN completed")
             return
-
-        loop = asyncio.get_running_loop()
         try:
-            result = await loop.run_in_executor(None, login,  self.store.session, email, password)
+            result = await asyncio.to_thread(login, self.store.session, email, password)
         except Exception as e:
             log.exception("Real login failed for %s", email)
             await self.send(f"{tag} NO [AUTHENTICATIONFAILED] Login failed: {e}")
@@ -1046,12 +1069,11 @@ class IMAPSession:
             return
         mb = self.mailbox
         to_remove = [m for m in mb.messages if "\\Deleted" in m["flags"]]
-        loop = asyncio.get_running_loop()
         for msg in to_remove:
             remote_id = msg.get("remote_id")
             if remote_id and self.store.token:
                 try:
-                    await loop.run_in_executor(None, delete_email, self.store.session, self.store.token, remote_id)
+                    await asyncio.to_thread(delete_email, self.store.session, self.store.token, remote_id)
                 except Exception as e:
                     if is_auth_error(e):
                         self.store.invalidate_auth("Token is invalid")
@@ -1210,7 +1232,6 @@ class IMAPSession:
             await self.send(f"{tag} OK UID COPY completed (no-op)")
             return
 
-        loop = asyncio.get_running_loop()
         for uid in uids:
             msg = mb.by_uid(uid)
             remote_id = msg.get("remote_id") if msg else None
@@ -1218,9 +1239,9 @@ class IMAPSession:
                 continue
             try:
                 if dest_key == "TRASH":
-                    await loop.run_in_executor(None, delete_email, self.store.session, self.store.token, remote_id)
+                    await asyncio.to_thread(delete_email, self.store.session, self.store.token, remote_id)
                 else:
-                    await loop.run_in_executor(None, update_email, self.store.session, self.store.token, remote_id, "spam")  
+                    await asyncio.to_thread(update_email, self.store.session, self.store.token, remote_id, "spam")  
             except Exception as e:
                 if is_auth_error(e):
                     self.store.invalidate_auth("Token is invalid")
@@ -1310,7 +1331,7 @@ def make_smtp_handler(ssl_ctx, store: MailboxStore):
                         b64 = resp_line.decode().strip()
                     try:
                         _, username, password = base64.b64decode(b64).decode("utf-8", errors="replace").split("\0")
-                        result = await loop.run_in_executor(None, login, store.session, username, password)
+                        result = await asyncio.to_thread(login, store.session, username, password)
                         authenticated_token = result.get("newToken")
                     except Exception:
                         log.exception("SMTP AUTH PLAIN failed")
@@ -1325,7 +1346,7 @@ def make_smtp_handler(ssl_ctx, store: MailboxStore):
                     try:
                         username = base64.b64decode(user_line.decode().strip()).decode("utf-8", errors="replace")
                         password = base64.b64decode(pass_line.decode().strip()).decode("utf-8", errors="replace")
-                        result = await loop.run_in_executor(None, login, store.session, username, password)
+                        result = await asyncio.to_thread(login, store.session, username, password)
                         authenticated_token = result.get("newToken")
                     except Exception:
                         log.exception("SMTP AUTH LOGIN failed")
@@ -1357,7 +1378,10 @@ def make_smtp_handler(ssl_ctx, store: MailboxStore):
                             req_body = build_send_email_request(raw)
                             if should_encrypt_for(req_body):
                                 req_body = await encrypt_outgoing_email(store, req_body)
-                            await loop.run_in_executor(None, send_email, authenticated_token, req_body)
+                            elif req_body.get("attachments"):
+                                uploaded = await upload_plain_attachments(store, req_body["attachments"])
+                                req_body["attachments"] = uploaded
+                            await asyncio.to_thread(send_email, store.session, authenticated_token, req_body)
                         except Exception as e:
                             if is_auth_error(e):
                                 store.invalidate_auth("Token is not valid")
@@ -1406,9 +1430,21 @@ def _addr_list(header_val):
 def build_send_email_request(raw: bytes) -> dict:
     parsed = email_pkg.message_from_bytes(raw)
     text_body, html_body = None, None
+    attachments = []
     if parsed.is_multipart():
         for part in parsed.walk():
             ctype = part.get_content_type()
+            disp = str(part.get("Content-Disposition", ""))
+            filename = part.get_filename()
+            if filename or "attachment" in disp.lower():
+                data = part.get_payload(decode=True)
+                if data is not None:
+                    attachments.append({
+                        "name": filename or "attachment",
+                        "type": ctype or "application/octet-stream",
+                        "data": data,
+                    })
+                continue
             if ctype == "text/plain" and text_body is None:
                 text_body = (part.get_payload(decode=True) or b"").decode(part.get_content_charset() or "utf-8", errors="replace")
             elif ctype == "text/html" and html_body is None:
@@ -1431,6 +1467,8 @@ def build_send_email_request(raw: bytes) -> dict:
         body["textBody"] = text_body
     if html_body is not None:
         body["htmlBody"] = html_body
+    if attachments:
+        body["attachments"] = attachments
     return body
 
 # ---------------------------------------------------------------------------

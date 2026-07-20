@@ -79,27 +79,30 @@ async def get_my_decrypted_private_key(store: "MailboxStore") -> str | None:
         return None
     if store._cached_private_key is not None:
         return store._cached_private_key
-    loop = asyncio.get_running_loop()
-    try:
-        encrypted_keystore = await loop.run_in_executor(
-            None, download_keystore, store.session, store.token, store.email, "Encryption"
-        )
-        mapped_keystore = {
-            "userEmail": encrypted_keystore["address"],
-            "type": "Encryption",
-            "publicKey": encrypted_keystore["publicKey"],
-            "privateKeyEncrypted": encrypted_keystore["encryptionPrivateKey"],
-        }
-        result = await call_crypto_bridge({
-            "action": "open_keystore",
-            "encryptedKeystore": mapped_keystore,
-            "mnemonic": store.mnemonic,
-        })
-        store._cached_private_key = result["keys"]["secretKey"]
-        return store._cached_private_key
-    except Exception:
-        log.exception("Failed to fetch/open encryption keystore")
-        return None
+    async with store._keystore_lock:
+        if store._cached_private_key is not None:  # re-check after acquiring
+            return store._cached_private_key
+        loop = asyncio.get_running_loop()
+        try:
+            encrypted_keystore = await loop.run_in_executor(
+                None, download_keystore, store.session, store.token, store.email, "Encryption"
+            )
+            mapped_keystore = {
+                "userEmail": encrypted_keystore["address"],
+                "type": "Encryption",
+                "publicKey": encrypted_keystore["publicKey"],
+                "privateKeyEncrypted": encrypted_keystore["encryptionPrivateKey"],
+            }
+            result = await call_crypto_bridge({
+                "action": "open_keystore",
+                "encryptedKeystore": mapped_keystore,
+                "mnemonic": store.mnemonic,
+            })
+            store._cached_private_key = result["keys"]["secretKey"]
+            return store._cached_private_key
+        except Exception:
+            log.exception("Failed to fetch/open encryption keystore")
+            return None
 
 async def decrypt_mail(store: "MailboxStore", wrapped_keys: list, encrypted_text: str, encrypted_preview: str, encrypted_session_key: str, version: str = '') -> dict:
     private_key_b64 = await get_my_decrypted_private_key(store)
@@ -130,9 +133,9 @@ async def decrypt_mail(store: "MailboxStore", wrapped_keys: list, encrypted_text
         log.exception("Failed to decrypt mail: %s", e)
         return {"ok": False, "error": "decrypt failed"}
 
-async def generate_attachments_session_key() -> bytes:
+async def generate_attachments_session_key() -> str:
     result = await call_crypto_bridge({"action": "generate_session_key"})
-    return bytes(result["sessionKey"])
+    return result["sessionKey"]
 
 async def encrypt_outgoing_email(store: "MailboxStore", req_body: dict) -> dict:
     addresses = [r["email"] for r in req_body.get("to", [])] + [r["email"] for r in req_body.get("cc", [])]
@@ -144,26 +147,41 @@ async def encrypt_outgoing_email(store: "MailboxStore", req_body: dict) -> dict:
         {"email": r["address"], "publicHybridKey": r["publicKey"]}
         for r in looked_up
     ]
-    attachments_session_key = None
-    if req_body.get("attachments"):
-    	attachments_session_key = await generate_attachments_session_key()
+    raw_attachments = req_body.get("attachments") or []
+    attachments_session_key_b64 = None
+    uploaded_attachments = []
+    if raw_attachments:
+        attachments_session_key_b64 = await generate_attachments_session_key()
+        for att in raw_attachments:
+            encrypted_bytes = await encrypt_attachment(attachments_session_key_b64, att["data"])
+            uploaded = await loop.run_in_executor(
+                None, upload_attachment, store.session, store.token, att["name"], att["type"], encrypted_bytes,
+            )
+            uploaded_attachments.append({
+                "blobId": uploaded["blobId"],
+                "name": att["name"],
+                "type": att["type"],
+                "size": len(att["data"]),
+            })
    
     result = await call_crypto_bridge({
         "action": "encrypt",
-        "email": {"text": req_body.get("textBody", "")},
-        "previewText": req_body.get("textBody", "")[:256],
-        "attachmentsSessionKey": attachments_session_key,
+        "email": {"text": req_body.get("textBody", " ")},
+        "preview": req_body.get("textBody", "")[:256],
+        "attachmentsSessionKey": attachments_session_key_b64,
         "recipients": recipients,
     })
     new_body = dict(req_body)
     new_body.pop("textBody", None)
     new_body.pop("htmlBody", None)
+    new_body.pop("attachments", None)
     block = result["result"]
     new_body["encryptedText"] = block["encryptedText"]
     new_body["wrappedKeys"] = block["wrappedKeys"]
     new_body["encryptedPreview"] = block["encryptedPreview"]
     new_body["encryptedAttachmentsSessionKey"] = block["encryptedAttachmentsSessionKey"]
-    
+    if uploaded_attachments:
+        new_body["attachments"] = uploaded_attachments
     new_body["encryption"] = result["result"]
     return new_body
 
@@ -203,6 +221,20 @@ def _pkcs7_unpad(data: bytes) -> bytes:
     pad_len = data[-1]
     return data[:-pad_len]
 
+async def upload_plain_attachments(store: "MailboxStore", raw_attachments: list) -> list:
+    loop = asyncio.get_running_loop()
+    uploaded = []
+    for att in raw_attachments:
+        result = await loop.run_in_executor(
+            None, upload_attachment, store.session, store.token, att["name"], att["type"], att["data"],
+        )
+        uploaded.append({
+            "blobId": result["blobId"],
+            "name": att["name"],
+            "type": att["type"],
+            "size": len(att["data"]),
+        })
+    return uploaded
 
 def encrypt_text_with_key(text: str, secret: str) -> str:
     salt = os.urandom(8)
@@ -259,15 +291,6 @@ def basic_headers_mail() -> dict:
         "internxt-client": "mail-web",
         "internxt-version": "v1.0.810",
     }
-
-def headers(token: str) -> dict:
-    return {
-        "Content-Type": "application/json; charset=utf-8",
-        "Accept": "application/json, text/plain, */*",
-        "internxt-client": "drive-web",
-        "internxt-version": "v1.0.810",
-        "token": token,
-    } 
 
 def security_details(session: requests.Session, email: str) -> dict:
     resp = session.post(
@@ -338,8 +361,8 @@ def list_emails(session: requests.Session, token: str, mailbox: str, limit: int 
 
 
 
-def send_email(token: str, body: dict) -> dict:
-    resp = requests.post(f"{MAIL_API_URL}/email/send", json=body, headers=auth_headers(token), timeout=TIME_OUT_AFTER_SECONDS)
+def send_email(session: requests.Session, token: str, body: dict) -> dict:
+    resp = session.post(f"{MAIL_API_URL}/email/send", json=body, headers=auth_headers(token), timeout=TIME_OUT_AFTER_SECONDS)
     if not resp.ok:
         log.error("send_email failed (%s): %s", resp.status_code, resp.text)
         resp.raise_for_status()
@@ -386,6 +409,18 @@ def download_attachment(session: requests.Session, token: str, mail_id: str, blo
         resp.raise_for_status()
     return resp.content
 
+def upload_attachment(session: requests.Session, token: str, filename: str, content_type: str, data: bytes) -> dict:
+    resp = session.post(
+        f"{MAIL_API_URL}/email/attachment",
+        files={"attachments": (filename, data, content_type or "application/octet-stream")},
+        headers=auth_headers_multipart(token),
+        timeout=TIME_OUT_AFTER_SECONDS,
+    )
+    if not resp.ok:
+        log.error("upload_attachment failed (%s): %s", resp.status_code, resp.text)
+        resp.raise_for_status()
+    return resp.json()
+
 def delete_email(session: requests.Session, token: str, email_id: str) -> None:
     resp = session.delete(
         f"{MAIL_API_URL}/email/{email_id}",
@@ -413,6 +448,7 @@ def update_email(session: requests.Session, token: str, email_id: str, mailbox: 
     if not resp.ok:
         log.error("update_email(%s) failed (%s): %s", email_id, resp.status_code, resp.text)
         resp.raise_for_status()
+
 async def decrypt_attachment(session_key_b64: str, encrypted_data: bytes) -> bytes:
     result = await call_crypto_bridge({
         "action": "decrypt_attachment",
@@ -420,3 +456,17 @@ async def decrypt_attachment(session_key_b64: str, encrypted_data: bytes) -> byt
         "data": base64.b64encode(encrypted_data).decode("ascii"),
     })
     return base64.b64decode(result["data"])
+
+async def encrypt_attachment(session_key_b64: str, data: bytes) -> bytes:
+    result = await call_crypto_bridge({
+        "action": "encrypt_attachment",
+        "sessionKey": session_key_b64,
+        "data": base64.b64encode(data).decode("ascii"),
+    })
+    return base64.b64decode(result["data"])
+
+def auth_headers_multipart(token: str) -> dict:
+    headers = auth_headers_mail(token)
+    headers.pop("Content-Type", None)
+    assert "Content-Type" not in headers  # fail loud if this regresses
+    return headers

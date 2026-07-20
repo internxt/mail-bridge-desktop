@@ -1,5 +1,5 @@
 // crypto_bridge.mjs
-import { encryptEmailHybridForMultipleRecipients, genSymmetricKey, decryptSymmetrically, decryptEmailHybrid, openEncryptionKeystore } from 'internxt-crypto'; 
+import { encryptEmailHybridForMultipleRecipients, genSymmetricKey, decryptSymmetrically, encryptSymmetrically, decryptEmailHybrid, openEncryptionKeystore } from 'internxt-crypto'; 
 
 class NoWrappedKeyError extends Error {
   constructor(email) {
@@ -21,8 +21,6 @@ async function readStdin() {
   for await (const chunk of process.stdin) chunks.push(chunk);
   return Buffer.concat(chunks).toString('utf-8');
 }
-
-export const ENCRYPTED_EMAIL_PREFIX = 'INTERNXT-ENCRYPTED-EMAIL-v1';
 
 async function decryptForMe(wrappedKeys, encText, encPreview, encAttachmentsSessionKey, secretKeyBytes, myEmail) {
   const normalized = myEmail.toLowerCase();
@@ -76,7 +74,7 @@ async function main() {
       const email = {
         text: input.email.text,
         preview: input.preview,
-        attachmentsSessionKey: input.attachmentsSessionKey ?? new Uint8Array(),
+        attachmentsSessionKey: input.attachmentsSessionKey ? b64ToBytes(input.attachmentsSessionKey) : new Uint8Array(),
       };
 
       const { encryptedKeys, encEmail } = await
@@ -92,14 +90,20 @@ async function main() {
       process.stdout.write(JSON.stringify({ ok: true, result }));
     } else if (input.action === 'generate_session_key') {
       const key = genSymmetricKey();
-      process.stdout.write(JSON.stringify({ ok: true, sessionKey: key }));
+      process.stdout.write(JSON.stringify({ ok: true, sessionKey: bytesToB64(key) }));
      } else if (input.action === 'decrypt_attachment') {
         const plaintext = await decryptSymmetrically(
         b64ToBytes(input.sessionKey),
         b64ToBytes(input.data),
       );
       process.stdout.write(JSON.stringify({ ok: true, data: bytesToB64(plaintext) }));
-     }
+     } else if (input.action === 'encrypt_attachment') {
+       const ciphertext = await encryptSymmetrically(
+         b64ToBytes(input.sessionKey),
+         b64ToBytes(input.data),
+       );
+       process.stdout.write(JSON.stringify({ ok: true, data: bytesToB64(ciphertext) }));
+      }
      else {
       process.stdout.write(JSON.stringify({ ok: false, error: `unknown action: ${input.action}` }));
       process.exit(1);
