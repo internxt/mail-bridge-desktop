@@ -43,8 +43,7 @@
     "label": "Mailbox",
     "resync": "Resync",
     "signOut": "Sign out",
-    "syncing": "Downloading and decrypting your mailbox — {{pct}}% · {{done}} of {{total}} messages",
-    "timeLeft": "~{{min}} min left",
+    "syncing": "Downloading and decrypting your mailbox — {{progress}}%",
     "flow": {
       "vault": "encrypted vault",
       "bridge": "on this Mac",

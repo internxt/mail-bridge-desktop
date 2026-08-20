@@ -7,7 +7,7 @@ import { Onboarding } from './views/Onboarding'
 import { useTheme } from './hooks/useTheme'
 import type { View } from './components/shared/data'
 
-const SYNC_PCT = 4
+const SYNC_PROGRESS = 4
 
 const App = (): React.JSX.Element => {
   const { theme, resolved, setTheme } = useTheme('light')
@@ -20,12 +20,12 @@ const App = (): React.JSX.Element => {
         <>
           <Sidebar
             view={view}
-            syncPct={SYNC_PCT}
+            progress={SYNC_PROGRESS}
             onShowMailbox={() => setView('mailbox')}
             onShowSettings={() => setView('settings')}
           />
           {view === 'mailbox' ? (
-            <MailboxView syncPct={SYNC_PCT} />
+            <MailboxView progress={SYNC_PROGRESS} />
           ) : (
             <SettingsView
               theme={theme}

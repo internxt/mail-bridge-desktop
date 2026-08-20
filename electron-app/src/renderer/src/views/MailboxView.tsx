@@ -16,15 +16,17 @@ import { ConnectionPanel } from '@renderer/components/mailbox/ConnectionPannel'
 
 const USERNAME = 'marta@inxt.com'
 
-export const MailboxView = ({ syncPct }: { syncPct: number }): React.JSX.Element => {
+export const MailboxView = ({ progress }: { progress: number }): React.JSX.Element => {
   const { t } = useTranslation()
   const [showPw, setShowPw] = useState(false)
   const [client, setClient] = useState('Apple Mail')
 
   // Resolve a client's display name/note: proper-name clients use their mock
   // strings; the "other" entry is translated via clients.<key>.
-  const clientName = (c: MailClient): string => (c.translate ? t(`clients.${c.translate}.name`) : c.name)
-  const clientNote = (c: MailClient): string => (c.translate ? t(`clients.${c.translate}.note`) : c.note)
+  const clientName = (c: MailClient): string =>
+    c.translate ? t(`clients.${c.translate}.name`) : c.name
+  const clientNote = (c: MailClient): string =>
+    c.translate ? t(`clients.${c.translate}.note`) : c.note
 
   const selectedClient = MAIL_CLIENTS.find((c) => c.name === client)
   const selectedClientName = selectedClient ? clientName(selectedClient) : client
@@ -83,13 +85,12 @@ export const MailboxView = ({ syncPct }: { syncPct: number }): React.JSX.Element
         <div className="mt-4 flex items-center gap-3 border-t border-primary/20 pt-3.5">
           <div className="flex-1">
             <div className="text-[12.5px] font-semibold text-gray-100">
-              {t('mailbox.syncing', { pct: syncPct, done: '2,481', total: '61,904' })}
+              {t('mailbox.syncing', { progress: progress })}
             </div>
             <div className="mt-[7px] h-[5px] overflow-hidden rounded-full bg-primary/20">
-              <div className="h-full rounded-full bg-primary" style={{ width: `${syncPct}%` }} />
+              <div className="h-full rounded-full bg-primary" style={{ width: `${progress}%` }} />
             </div>
           </div>
-          <span className="flex-none text-xs text-gray-60">{t('mailbox.timeLeft', { min: 4 })}</span>
         </div>
       </div>
 

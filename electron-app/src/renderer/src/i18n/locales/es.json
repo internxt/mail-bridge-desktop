@@ -43,8 +43,7 @@
     "label": "Buzón",
     "resync": "Resincronizar",
     "signOut": "Cerrar sesión",
-    "syncing": "Descargando y descifrando tu buzón — {{pct}}% · {{done}} de {{total}} mensajes",
-    "timeLeft": "~{{min}} min restantes",
+    "syncing": "Descargando y descifrando tu buzón — {{progress}}%",
     "flow": {
       "vault": "bóveda cifrada",
       "bridge": "en este Mac",

@@ -4,14 +4,14 @@ import type { View } from './data'
 
 interface SidebarProps {
   view: View
-  syncPct: number
+  progress: number
   onShowMailbox: () => void
   onShowSettings: () => void
 }
 
 export function Sidebar({
   view,
-  syncPct,
+  progress,
   onShowMailbox,
   onShowSettings
 }: SidebarProps): React.JSX.Element {
@@ -58,10 +58,10 @@ export function Sidebar({
               <span className="h-[3px] w-[54px] overflow-hidden rounded-full bg-gray-10">
                 <span
                   className="block h-full rounded-full bg-primary"
-                  style={{ width: `${syncPct}%` }}
+                  style={{ width: `${progress}%` }}
                 />
               </span>
-              <span className="text-[11.5px] font-semibold text-primary">{syncPct}%</span>
+              <span className="text-[11.5px] font-semibold text-primary">{progress}%</span>
             </div>
           </div>
         </button>
