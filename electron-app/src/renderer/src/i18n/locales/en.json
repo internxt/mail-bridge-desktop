@@ -1,0 +1,123 @@
+{
+  "common": {
+    "mailboxes": "Mailboxes",
+    "settings": "Settings",
+    "copy": "Copy",
+    "copied": "Copied",
+    "switchTheme": "Switch theme",
+    "help": "Help"
+  },
+  "sidebar": {
+    "running": "Bridge is running",
+    "addMailbox": "Add mailbox"
+  },
+  "onboarding": {
+    "idle": "Bridge is idle",
+    "noMailbox": "no mailbox linked",
+    "empty": {
+      "title": "Nothing here yet",
+      "note": "Your linked mailboxes will appear in this list."
+    },
+    "hero": {
+      "title": "Bring encrypted mail to the app you already use",
+      "subtitle": "Bridge runs locally, decrypting your Internxt mailbox for Apple Mail, Outlook or Thunderbird. Sign in once in your browser and you land right back here.",
+      "signIn": "Sign in with browser",
+      "howItWorks": "How Bridge works"
+    },
+    "features": {
+      "local": {
+        "title": "Keys stay local",
+        "note": "Decryption happens on this device only."
+      },
+      "anyClient": {
+        "title": "Any IMAP client",
+        "note": "Apple Mail, Outlook, Thunderbird."
+      },
+      "background": {
+        "title": "Runs in background",
+        "note": "Syncs quietly from the menu bar."
+      }
+    }
+  },
+  "mailbox": {
+    "label": "Mailbox",
+    "resync": "Resync",
+    "signOut": "Sign out",
+    "syncing": "Downloading and decrypting your mailbox — {{pct}}% · {{done}} of {{total}} messages",
+    "timeLeft": "~{{min}} min left",
+    "flow": {
+      "vault": "encrypted vault",
+      "bridge": "on this Mac",
+      "client": "connected client"
+    },
+    "connect": {
+      "title": "Connect a mail client",
+      "note": "Pick your app and Bridge writes the account for you — or copy the keys below by hand."
+    },
+    "setup": "Set up {{client}} automatically",
+    "manual": {
+      "title": "Manual settings",
+      "badge": "Never leaves this device",
+      "showPassword": "Show password",
+      "hidePassword": "Hide password"
+    },
+    "connection": {
+      "incoming": "incoming",
+      "outgoing": "outgoing",
+      "hostname": "Hostname",
+      "port": "Port",
+      "username": "Username",
+      "password": "Password",
+      "security": "Security"
+    }
+  },
+  "clients": {
+    "other": {
+      "name": "Other client",
+      "note": "manual setup"
+    }
+  },
+  "settings": {
+    "preferences": "Preferences",
+    "appearance": {
+      "title": "Appearance",
+      "note": "Bridge can follow macOS or stay on a fixed theme."
+    },
+    "themes": {
+      "light": {
+        "label": "Light",
+        "note": "Always the light theme"
+      },
+      "dark": {
+        "label": "Dark",
+        "note": "Always the dark theme"
+      },
+      "system": {
+        "label": "System",
+        "note": "Follow macOS appearance"
+      }
+    },
+    "behaviour": {
+      "title": "Behaviour",
+      "login": {
+        "title": "Launch Bridge at login",
+        "note": "Start syncing before you open your mail client."
+      },
+      "menubar": {
+        "title": "Keep running in the menu bar",
+        "note": "Closing the window leaves Bridge active."
+      },
+      "updates": {
+        "title": "Install updates automatically",
+        "note": "Apply new versions on the next restart."
+      }
+    },
+    "ports": {
+      "title": "Local ports",
+      "note": "Change these only if another app already uses them."
+    },
+    "version": "Bridge {{version}} · up to date",
+    "viewLogs": "View logs",
+    "reportProblem": "Report a problem"
+  }
+}
