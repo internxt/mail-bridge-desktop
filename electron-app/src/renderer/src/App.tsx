@@ -9,7 +9,7 @@ import type { View } from './components/shared/data'
 
 const SYNC_PCT = 4
 
-function App(): React.JSX.Element {
+const App = (): React.JSX.Element => {
   const { theme, resolved, setTheme } = useTheme('light')
   const [linked, setLinked] = useState(false)
   const [view, setView] = useState<View>('mailbox')

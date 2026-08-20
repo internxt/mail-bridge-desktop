@@ -9,11 +9,9 @@ export type ThemeId = 'light' | 'dark' | 'system'
 export type View = 'mailbox' | 'settings'
 
 export interface MailClient {
-  /** Proper name (mock). When `translate` is set, resolve via i18n instead. */
   name: string
   note: string
   initial: string
-  /** i18n key under `clients.*` used to translate name/note (e.g. "other"). */
   translate?: string
 }
 
