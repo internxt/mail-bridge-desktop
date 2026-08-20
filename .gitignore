@@ -1,3 +1,8 @@
+# .gitignore from Node.gitignore template: https://github.com/github/gitignore/blob/main/Node.gitignore
+
+# VSCode
+.vscode
+
 # Logs
 logs
 *.log
@@ -141,8 +146,3 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
-
-*.pem
-package-lock.json
-__pychache__/*
-*.pyc
