@@ -147,3 +147,4 @@ package-lock.json
 __pychache__/*
 *.pyc
 .DS_Store
+/bridge.exe
