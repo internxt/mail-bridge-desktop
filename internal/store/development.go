@@ -18,8 +18,8 @@ const (
 // environment, so the daemon can run before the IPC channel with the desktop
 // client exists.
 //
-// Values come from the .env, which config.Load already reads from .env. 
-// Nothing happens when they are unset, and stored values are 
+// Values come from the .env, which config.Load already reads from .env.
+// Nothing happens when they are unset, and stored values are
 // never overwritten: a real session always wins over a development one.
 //
 // It reports which keys it wrote, for the caller to log.
@@ -27,7 +27,7 @@ const (
 // TODO(auth): drop this once the desktop client pushes the session over IPC.
 func (s *Store) SeedFromEnv() ([]string, error) {
 	seeds := map[string]string{
-		KeyToken:    os.Getenv("BRIDGE_DEV_TOKEN"),
+		KeyToken: os.Getenv("BRIDGE_DEV_TOKEN"),
 	}
 
 	var seeded []string

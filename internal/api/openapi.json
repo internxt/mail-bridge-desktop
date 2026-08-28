@@ -1,0 +1,1399 @@
+{
+  "openapi": "3.0.0",
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "HealthController_check",
+        "parameters": [],
+        "responses": { "200": { "description": "" } },
+        "tags": ["Health"]
+      }
+    },
+    "/email/domains": {
+      "get": {
+        "description": "Returns every domain for the authenticated user.",
+        "operationId": "EmailController_getDomains",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/MailDomainDto" }
+                }
+              }
+            }
+          }
+        },
+        "security": [{ "bearer": [] }],
+        "summary": "List domains",
+        "tags": ["Email"]
+      }
+    },
+    "/email/mailboxes": {
+      "get": {
+        "description": "Returns every mailbox for the authenticated user, including folder counts.",
+        "operationId": "EmailController_getMailboxes",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/MailboxResponseDto" }
+                }
+              }
+            }
+          }
+        },
+        "security": [{ "bearer": [] }],
+        "summary": "List mailboxes",
+        "tags": ["Email"]
+      }
+    },
+    "/email": {
+      "get": {
+        "description": "Paginated list of email summaries. Filter by mailbox or omit to list all. Responses collapse by thread in every mailbox except `drafts`: each row represents the most recent email of the thread in that mailbox and carries `threadSize`, `lastReceivedAt` and `participants` (cross-mailbox).",
+        "operationId": "EmailController_list",
+        "parameters": [
+          {
+            "name": "mailbox",
+            "required": false,
+            "in": "query",
+            "description": "Mailbox to filter by. Omit to list emails from all mailboxes.",
+            "schema": {
+              "enum": ["inbox", "drafts", "sent", "trash", "spam", "archive"],
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "description": "Maximum number of emails to return. Defaults to `20`.",
+            "schema": { "example": 20, "type": "number" }
+          },
+          {
+            "name": "position",
+            "required": false,
+            "in": "query",
+            "description": "Zero-based offset for pagination. Defaults to `0`.",
+            "schema": { "example": 0, "type": "number" }
+          },
+          {
+            "name": "anchorId",
+            "required": false,
+            "in": "query",
+            "description": "Anchor ID for pagination.",
+            "schema": { "example": "Ma1f09b…", "type": "string" }
+          },
+          {
+            "name": "unread",
+            "required": false,
+            "in": "query",
+            "description": "Filter by read status.",
+            "schema": { "example": true, "type": "boolean" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailListResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [{ "bearer": [] }],
+        "summary": "List emails",
+        "tags": ["Email"]
+      }
+    },
+    "/email/search": {
+      "post": {
+        "description": "Search emails by text, sender, recipient, date range, read status or attachment.",
+        "operationId": "EmailController_search",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/SearchEmailQueryDto" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailListResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [{ "bearer": [] }],
+        "summary": "Search emails",
+        "tags": ["Email"]
+      }
+    },
+    "/email/threads/{id}": {
+      "get": {
+        "description": "Returns all emails in the same thread as the given id, ordered chronologically. If the email has no replies, returns a single-element array.",
+        "operationId": "EmailController_getThread",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Any email id in the thread",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/EmailResponseDto" }
+                }
+              }
+            }
+          },
+          "404": { "description": "Email not found" }
+        },
+        "security": [{ "bearer": [] }],
+        "summary": "Get email thread by id",
+        "tags": ["Email"]
+      }
+    },
+    "/email/keys/lookup": {
+      "post": {
+        "description": "Returns the public encryption key for each address if it belongs to an active Internxt domain. Returns null for external or unknown addresses.",
+        "operationId": "EmailController_lookupRecipientKeys",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LookupRecipientKeysRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LookupRecipientKeysResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request: 1-50 valid emails required"
+          }
+        },
+        "security": [{ "bearer": [] }],
+        "summary": "Look up recipient public keys",
+        "tags": ["Email"]
+      }
+    },
+    "/email/send": {
+      "post": {
+        "description": "Composes and sends an email on behalf of the authenticated user. At least one recipient in `to` is required.",
+        "operationId": "EmailController_send",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/SendEmailRequestDto" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Email sent successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailCreatedResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [{ "bearer": [] }],
+        "summary": "Send an email",
+        "tags": ["Email"]
+      }
+    },
+    "/email/{id}/reply": {
+      "post": {
+        "description": "Sends a reply to a given email",
+        "operationId": "EmailController_reply",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "JMAP id of the email being replied to",
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ReplyEmailRequestDto" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Reply sent successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailCreatedResponseDto"
+                }
+              }
+            }
+          },
+          "404": { "description": "Original email not found" }
+        },
+        "security": [{ "bearer": [] }],
+        "summary": "Reply to an email",
+        "tags": ["Email"]
+      }
+    },
+    "/email/drafts": {
+      "post": {
+        "description": "Creates a new draft email. All fields are optional so partial drafts can be saved. Pass `encryption` to store the body encrypted only with the sender's key — the sender is the only reader and can decrypt it on retrieval.",
+        "operationId": "EmailController_saveDraft",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/DraftEmailRequestDto" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Draft saved successfully",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/EmailResponseDto" }
+              }
+            }
+          }
+        },
+        "security": [{ "bearer": [] }],
+        "summary": "Save a draft",
+        "tags": ["Email"]
+      }
+    },
+    "/email/drafts/{id}": {
+      "patch": {
+        "description": "Updates a draft email. All fields are optional so partial drafts can be saved. Pass `encryption` with a fresh envelope to replace the stored body — the previous envelope is dropped together with the destroyed draft.",
+        "operationId": "EmailController_updateDraft",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/DraftEmailRequestDto" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Draft updated successfully",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/EmailResponseDto" }
+              }
+            }
+          },
+          "404": { "description": "Draft not found" },
+          "409": {
+            "description": "Draft was modified concurrently; retry the save"
+          }
+        },
+        "security": [{ "bearer": [] }],
+        "summary": "Update a draft",
+        "tags": ["Email"]
+      },
+      "get": {
+        "description": "Returns a draft",
+        "operationId": "EmailController_getDraft",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Draft ID",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/EmailResponseDto" }
+              }
+            }
+          },
+          "404": { "description": "Draft not found" }
+        },
+        "security": [{ "bearer": [] }],
+        "summary": "Get a draft",
+        "tags": ["Email"]
+      },
+      "delete": {
+        "description": "Permanently discards a draft by ID. Returns 404 if the email exists but is not a draft.",
+        "operationId": "EmailController_discardDraft",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Draft ID",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "204": { "description": "Draft discarded successfully" },
+          "404": { "description": "Draft not found" }
+        },
+        "security": [{ "bearer": [] }],
+        "summary": "Discard a draft",
+        "tags": ["Email"]
+      }
+    },
+    "/email/attachment": {
+      "post": {
+        "description": "Uploads an attachment and get the info to attach it to an user email.",
+        "operationId": "EmailController_uploadAttachment",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Upload attachment successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadAttachmentResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [{ "bearer": [] }],
+        "summary": "Upload an attachment",
+        "tags": ["Email"]
+      }
+    },
+    "/email/{id}/attachment/{blobId}": {
+      "get": {
+        "description": "Streams the bytes of an attachment from the given email. Optional `name` and `type` query params set the response filename and content-type.",
+        "operationId": "EmailController_downloadAttachment",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Email ID",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "blobId",
+            "required": true,
+            "in": "path",
+            "description": "Attachment blob ID",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "type",
+            "required": false,
+            "in": "query",
+            "schema": { "example": "image/jpeg" }
+          },
+          {
+            "name": "name",
+            "required": false,
+            "in": "query",
+            "schema": { "example": "photo.jpg" }
+          }
+        ],
+        "responses": { "200": { "description": "" } },
+        "security": [{ "bearer": [] }],
+        "summary": "Download an attachment",
+        "tags": ["Email"]
+      }
+    },
+    "/email/{id}": {
+      "patch": {
+        "description": "Partially update an email: move it to another mailbox, mark as read/unread, or flag/unflag. Multiple operations can be combined in a single request.",
+        "operationId": "EmailController_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Email ID",
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/UpdateEmailRequestDto" }
+            }
+          }
+        },
+        "responses": {
+          "204": { "description": "Email updated successfully" },
+          "404": { "description": "Email not found" }
+        },
+        "security": [{ "bearer": [] }],
+        "summary": "Update an email",
+        "tags": ["Email"]
+      },
+      "delete": {
+        "description": "Permanently deletes an email by ID.",
+        "operationId": "EmailController_delete",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Email ID",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "204": { "description": "Email deleted successfully" },
+          "404": { "description": "Email not found" }
+        },
+        "security": [{ "bearer": [] }],
+        "summary": "Delete an email",
+        "tags": ["Email"]
+      }
+    },
+    "/users/me/mail-account": {
+      "get": {
+        "description": "Returns the account status. When suspended, includes `suspendedAt` and the scheduled `deletionAt`.",
+        "operationId": "UserController_getMailAccount",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailAccountStatusResponseDto"
+                }
+              }
+            }
+          },
+          "404": { "description": "No mail account exists for the caller" }
+        },
+        "security": [{ "bearer": [] }],
+        "summary": "Get the caller`s mail account status",
+        "tags": ["User"]
+      },
+      "post": {
+        "operationId": "UserController_createMailAccount",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreateMailAccountDto" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateMailAccountResponseDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller`s tier does not include mail access"
+          },
+          "404": { "description": "Requested domain does not exist" },
+          "409": {
+            "description": "Caller already has an account, or the address is taken"
+          }
+        },
+        "security": [{ "bearer": [] }],
+        "summary": "Provision the caller`s mail account",
+        "tags": ["User"]
+      }
+    },
+    "/users/me/mail-account/keys": {
+      "get": {
+        "description": "If `address` is omitted, returns keys for the caller`s primary address.",
+        "operationId": "UserController_getMailAccountKeys",
+        "parameters": [
+          {
+            "name": "address",
+            "required": false,
+            "in": "query",
+            "description": "Address whose keys to fetch. Defaults to the caller`s primary address.",
+            "schema": { "example": "alice@inxt.eu", "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailAccountKeysResponseDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Address not found on this account, or keys not set"
+          }
+        },
+        "security": [{ "bearer": [] }],
+        "summary": "Get encryption keys and salt for one of the caller`s addresses",
+        "tags": ["User"]
+      }
+    },
+    "/addresses/availability": {
+      "get": {
+        "operationId": "AddressesController_checkAvailability",
+        "parameters": [
+          {
+            "name": "username",
+            "required": true,
+            "in": "query",
+            "description": "Local part of the email address (before the @)",
+            "schema": { "example": "alice", "type": "string" }
+          },
+          {
+            "name": "domain",
+            "required": true,
+            "in": "query",
+            "description": "Email domain",
+            "schema": { "example": "inxt.me", "type": "string" }
+          }
+        ],
+        "responses": { "200": { "description": "" } },
+        "security": [{ "addresses": [] }],
+        "summary": "Check address availability (called by the auth service)",
+        "tags": ["Addresses"]
+      }
+    },
+    "/gateway/addresses/{address}": {
+      "get": {
+        "operationId": "GatewayController_getAddress",
+        "parameters": [
+          {
+            "name": "address",
+            "required": true,
+            "in": "path",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": { "200": { "description": "" } },
+        "security": [{ "gateway": [] }],
+        "summary": "Get a mail address resource (used to resolve drive user id)",
+        "tags": ["Gateway"]
+      }
+    },
+    "/gateway/accounts/{uuid}/suspend": {
+      "post": {
+        "operationId": "GatewayController_suspendAccount",
+        "parameters": [
+          {
+            "name": "uuid",
+            "required": true,
+            "in": "path",
+            "description": "The UUID of the account",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "204": { "description": "" },
+          "404": { "description": "Account not found" }
+        },
+        "security": [{ "gateway": [] }],
+        "summary": "Suspend a mail account",
+        "tags": ["Gateway"]
+      }
+    },
+    "/gateway/accounts/{uuid}/reactivate": {
+      "post": {
+        "operationId": "GatewayController_reactivateAccount",
+        "parameters": [
+          {
+            "name": "uuid",
+            "required": true,
+            "in": "path",
+            "description": "The UUID of the account",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "204": { "description": "" },
+          "404": { "description": "Account not found" }
+        },
+        "security": [{ "gateway": [] }],
+        "summary": "Reactivate a mail account",
+        "tags": ["Gateway"]
+      }
+    },
+    "/stalwart-events": {
+      "post": {
+        "operationId": "StalwartEventsController_handleEvents",
+        "parameters": [],
+        "responses": { "200": { "description": "" } },
+        "tags": ["StalwartEvents"]
+      }
+    },
+    "/mta-hooks/rcpt": {
+      "post": {
+        "operationId": "MtaHooksController_rcpt",
+        "parameters": [],
+        "responses": { "201": { "description": "" } },
+        "security": [{ "mta-hooks": [] }],
+        "summary": "RCPT-stage hook",
+        "tags": ["MTA Hooks"]
+      }
+    }
+  },
+  "info": {
+    "title": "Mail API",
+    "description": "Internxt Mail Service API",
+    "version": "1.0",
+    "contact": {}
+  },
+  "tags": [],
+  "servers": [],
+  "components": {
+    "securitySchemes": {
+      "bearer": { "scheme": "bearer", "bearerFormat": "JWT", "type": "http" }
+    },
+    "schemas": {
+      "MailDomainDto": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "example": "f3a1b2c4-…" },
+          "status": { "type": "string", "example": "active" },
+          "domain": { "type": "string", "example": "internxt.me" },
+          "createdAt": { "type": "string", "example": "2025-06-15T10:29:55Z" },
+          "updatedAt": { "type": "string", "example": "2025-06-15T10:29:55Z" }
+        },
+        "required": ["id", "status", "domain", "createdAt", "updatedAt"]
+      },
+      "MailboxResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "example": "f3a1b2c4-…" },
+          "name": { "type": "string", "example": "Inbox" },
+          "type": {
+            "type": "string",
+            "enum": ["inbox", "drafts", "sent", "trash", "spam", "archive"],
+            "nullable": true,
+            "example": "inbox"
+          },
+          "parentId": { "type": "object", "nullable": true, "example": null },
+          "totalEmails": { "type": "number", "example": 142 },
+          "unreadEmails": { "type": "number", "example": 3 }
+        },
+        "required": [
+          "id",
+          "name",
+          "type",
+          "parentId",
+          "totalEmails",
+          "unreadEmails"
+        ]
+      },
+      "EmailAddressDto": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "example": "Alice Smith" },
+          "email": { "type": "string", "example": "alice@internxt.me" }
+        },
+        "required": ["email"]
+      },
+      "EncryptedWrappedKeyDto": {
+        "type": "object",
+        "properties": {
+          "hybridCiphertext": {
+            "type": "string",
+            "description": "Hybrid ciphertext (base64)"
+          },
+          "encryptedKey": {
+            "type": "string",
+            "description": "Encrypted symmetric key (base64)"
+          },
+          "encryptedForEmail": {
+            "type": "string",
+            "description": "Recipient address this key was wrapped for"
+          }
+        },
+        "required": ["hybridCiphertext", "encryptedKey", "encryptedForEmail"]
+      },
+      "EncryptedSummaryDto": {
+        "type": "object",
+        "properties": {
+          "encryptedPreview": {
+            "type": "string",
+            "description": "Encrypted preview snippet (base64)"
+          },
+          "wrappedKeys": {
+            "description": "Wrapped keys that unlock the preview, labeled per recipient; the caller picks theirs by address",
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/EncryptedWrappedKeyDto" }
+          }
+        },
+        "required": ["encryptedPreview", "wrappedKeys"]
+      },
+      "EmailSummaryResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "example": "Ma1f09b…" },
+          "mailboxIds": {
+            "example": ["d", "a"],
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "threadId": { "type": "string", "example": "T1a2b3c…" },
+          "from": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/EmailAddressDto" }
+          },
+          "to": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/EmailAddressDto" }
+          },
+          "subject": { "type": "string", "example": "Weekly sync notes" },
+          "receivedAt": { "type": "string", "example": "2025-06-15T10:30:00Z" },
+          "preview": {
+            "type": "string",
+            "example": "Hi team, here are the notes from…"
+          },
+          "isRead": { "type": "boolean", "example": true },
+          "isFlagged": { "type": "boolean", "example": false },
+          "isDraft": { "type": "boolean", "example": false },
+          "hasAttachment": { "type": "boolean", "example": false },
+          "size": {
+            "type": "number",
+            "example": 4096,
+            "description": "Size in bytes"
+          },
+          "encryption": {
+            "nullable": true,
+            "description": "Present only for encrypted emails. Carries the encrypted preview and the de-identified wrapped keys for inline client-side decryption.",
+            "type": "object",
+            "allOf": [{ "$ref": "#/components/schemas/EncryptedSummaryDto" }]
+          },
+          "threadSize": {
+            "type": "number",
+            "example": 3,
+            "description": "Total number of emails in the thread (cross-mailbox). Set only when the list collapses threads."
+          },
+          "lastReceivedAt": {
+            "type": "string",
+            "example": "2025-06-15T10:30:00Z",
+            "description": "receivedAt of the most recent email in the thread (cross-mailbox). Set only when the list collapses threads."
+          },
+          "participants": {
+            "description": "Unique senders that have written in the thread (cross-mailbox), deduplicated by email. Set only when the list collapses threads.",
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/EmailAddressDto" }
+          }
+        },
+        "required": [
+          "id",
+          "mailboxIds",
+          "threadId",
+          "from",
+          "to",
+          "subject",
+          "receivedAt",
+          "preview",
+          "isRead",
+          "isFlagged",
+          "isDraft",
+          "hasAttachment",
+          "size"
+        ]
+      },
+      "EmailListResponseDto": {
+        "type": "object",
+        "properties": {
+          "emails": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/EmailSummaryResponseDto" }
+          },
+          "total": {
+            "type": "number",
+            "example": 142,
+            "description": "Total emails in the mailbox"
+          },
+          "hasMoreMails": {
+            "type": "boolean",
+            "example": true,
+            "description": "Whether there are more emails to fetch"
+          },
+          "nextAnchor": { "type": "string", "example": "Ma1f09b…" }
+        },
+        "required": ["emails", "total", "hasMoreMails"]
+      },
+      "SearchEmailQueryDto": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string", "description": "Full-text search" },
+          "limit": { "type": "number", "example": 20 },
+          "position": { "type": "number", "example": 0 },
+          "from": {
+            "description": "Filter by sender",
+            "example": ["a@inxt.eu", "b@inxt.me"],
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "to": {
+            "description": "Filter by recipient",
+            "example": ["a@inxt.eu", "b@inxt.me"],
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "after": {
+            "type": "string",
+            "description": "ISO 8601 date — emails received after this date"
+          },
+          "before": {
+            "type": "string",
+            "description": "ISO 8601 date — emails received before this date"
+          },
+          "unread": {
+            "type": "boolean",
+            "description": "Filter by read status"
+          },
+          "hasAttachment": {
+            "type": "boolean",
+            "description": "Filter by attachment presence"
+          }
+        }
+      },
+      "EmailAttachmentDto": {
+        "type": "object",
+        "properties": {
+          "blobId": { "type": "string", "example": "T1a2b3c…" },
+          "name": { "type": "string", "example": "photo.jpg" },
+          "type": { "type": "string", "example": "image/jpeg" },
+          "size": {
+            "type": "number",
+            "example": 4096,
+            "description": "Size in bytes"
+          }
+        },
+        "required": ["blobId", "name", "type", "size"]
+      },
+      "EmailResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "example": "Ma1f09b…" },
+          "mailboxIds": {
+            "example": ["d", "a"],
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "threadId": { "type": "string", "example": "T1a2b3c…" },
+          "from": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/EmailAddressDto" }
+          },
+          "to": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/EmailAddressDto" }
+          },
+          "subject": { "type": "string", "example": "Weekly sync notes" },
+          "receivedAt": { "type": "string", "example": "2025-06-15T10:30:00Z" },
+          "preview": {
+            "type": "string",
+            "example": "Hi team, here are the notes from…"
+          },
+          "isRead": { "type": "boolean", "example": true },
+          "isFlagged": { "type": "boolean", "example": false },
+          "isDraft": { "type": "boolean", "example": false },
+          "hasAttachment": { "type": "boolean", "example": false },
+          "size": {
+            "type": "number",
+            "example": 4096,
+            "description": "Size in bytes"
+          },
+          "encryption": {
+            "nullable": true,
+            "description": "Present only for encrypted emails. Carries the encrypted preview and the de-identified wrapped keys for inline client-side decryption.",
+            "type": "object",
+            "allOf": [{ "$ref": "#/components/schemas/EncryptedSummaryDto" }]
+          },
+          "threadSize": {
+            "type": "number",
+            "example": 3,
+            "description": "Total number of emails in the thread (cross-mailbox). Set only when the list collapses threads."
+          },
+          "lastReceivedAt": {
+            "type": "string",
+            "example": "2025-06-15T10:30:00Z",
+            "description": "receivedAt of the most recent email in the thread (cross-mailbox). Set only when the list collapses threads."
+          },
+          "participants": {
+            "description": "Unique senders that have written in the thread (cross-mailbox), deduplicated by email. Set only when the list collapses threads.",
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/EmailAddressDto" }
+          },
+          "cc": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/EmailAddressDto" }
+          },
+          "bcc": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/EmailAddressDto" }
+          },
+          "replyTo": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/EmailAddressDto" }
+          },
+          "sentAt": {
+            "type": "string",
+            "nullable": true,
+            "example": "2025-06-15T10:29:55Z"
+          },
+          "textBody": {
+            "type": "string",
+            "nullable": true,
+            "example": "Hi team, here are the notes…"
+          },
+          "htmlBody": {
+            "type": "string",
+            "nullable": true,
+            "example": "<p>Hi team, here are the notes…</p>"
+          },
+          "attachments": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/EmailAttachmentDto" }
+          }
+        },
+        "required": [
+          "id",
+          "mailboxIds",
+          "threadId",
+          "from",
+          "to",
+          "subject",
+          "receivedAt",
+          "preview",
+          "isRead",
+          "isFlagged",
+          "isDraft",
+          "hasAttachment",
+          "size",
+          "cc",
+          "bcc",
+          "replyTo",
+          "sentAt",
+          "textBody",
+          "htmlBody",
+          "attachments"
+        ]
+      },
+      "LookupRecipientKeysRequestDto": {
+        "type": "object",
+        "properties": {
+          "addresses": {
+            "description": "1-50 email addresses to look up",
+            "example": ["alice@internxt.me", "bob@internxt.com"],
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        },
+        "required": ["addresses"]
+      },
+      "RecipientKeyDto": {
+        "type": "object",
+        "properties": {
+          "address": { "type": "string", "example": "alice@internxt.me" },
+          "publicKey": {
+            "type": "string",
+            "example": "base64encodedpublickey==",
+            "nullable": true
+          }
+        },
+        "required": ["address", "publicKey"]
+      },
+      "LookupRecipientKeysResponseDto": {
+        "type": "object",
+        "properties": {
+          "recipients": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/RecipientKeyDto" }
+          }
+        },
+        "required": ["recipients"]
+      },
+      "EncryptionBlockDto": {
+        "type": "object",
+        "properties": {
+          "version": { "type": "string", "example": "v3" },
+          "encryptedText": {
+            "type": "string",
+            "description": "Encrypted body (base64)"
+          },
+          "encryptedPreview": {
+            "type": "string",
+            "description": "Encrypted preview snippet (base64), ~256 chars plaintext, same session key as the body"
+          },
+          "encryptedAttachmentsSessionKey": {
+            "type": "string",
+            "description": "Encrypted attachments session key (base64), same session key as the body"
+          },
+          "wrappedKeys": {
+            "description": "Wrapped session keys, labeled per recipient; one entry unlocks body, preview and attachments key",
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/EncryptedWrappedKeyDto" }
+          }
+        },
+        "required": [
+          "version",
+          "encryptedText",
+          "encryptedPreview",
+          "encryptedAttachmentsSessionKey",
+          "wrappedKeys"
+        ]
+      },
+      "AttachmentRefDto": {
+        "type": "object",
+        "properties": {
+          "blobId": { "type": "string", "example": "T1a2b3c…" },
+          "name": { "type": "string", "example": "photo.jpg" },
+          "type": { "type": "string", "example": "image/jpeg" },
+          "size": {
+            "type": "number",
+            "example": 4096,
+            "description": "Size in bytes"
+          }
+        },
+        "required": ["blobId", "name", "type", "size"]
+      },
+      "SendEmailRequestDto": {
+        "type": "object",
+        "properties": {
+          "to": {
+            "description": "Primary recipients (at least one required)",
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/EmailAddressDto" }
+          },
+          "cc": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/EmailAddressDto" }
+          },
+          "bcc": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/EmailAddressDto" }
+          },
+          "subject": { "type": "string", "example": "Weekly sync notes" },
+          "textBody": {
+            "type": "string",
+            "example": "Hi team, here are the notes from today…",
+            "description": "Plain-text version of the email body"
+          },
+          "htmlBody": {
+            "type": "string",
+            "example": "<p>Hi team, here are the notes from today…</p>",
+            "description": "HTML version of the email body"
+          },
+          "encryption": { "$ref": "#/components/schemas/EncryptionBlockDto" },
+          "attachments": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/AttachmentRefDto" }
+          },
+          "deliveryMode": {
+            "type": "string",
+            "enum": ["INTERNXT", "EXTERNAL"],
+            "example": "INTERNXT"
+          },
+          "inReplyToEmailId": {
+            "type": "string",
+            "example": "Ma1f09b…",
+            "description": "JMAP id of the email being replied to (for threading)"
+          },
+          "draftId": {
+            "type": "string",
+            "example": "Ma1f09b…",
+            "description": "JMAP id of the draft being sent. When present, the draft is destroyed after the email is sent so it no longer appears in the Drafts folder."
+          }
+        },
+        "required": ["to", "subject"]
+      },
+      "EmailCreatedResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "Ma1f09b…",
+            "description": "ID of the created email"
+          }
+        },
+        "required": ["id"]
+      },
+      "ReplyEmailRequestDto": {
+        "type": "object",
+        "properties": {
+          "cc": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/EmailAddressDto" }
+          },
+          "bcc": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/EmailAddressDto" }
+          },
+          "textBody": {
+            "type": "string",
+            "example": "Hi team, here are the notes from today…",
+            "description": "Plain-text version of the email body"
+          },
+          "htmlBody": {
+            "type": "string",
+            "example": "<p>Hi team, here are the notes from today…</p>",
+            "description": "HTML version of the email body"
+          },
+          "encryption": { "$ref": "#/components/schemas/EncryptionBlockDto" },
+          "attachments": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/AttachmentRefDto" }
+          },
+          "deliveryMode": {
+            "type": "string",
+            "enum": ["INTERNXT", "EXTERNAL"],
+            "example": "INTERNXT"
+          },
+          "draftId": {
+            "type": "string",
+            "example": "Ma1f09b…",
+            "description": "JMAP id of the draft being sent. When present, the draft is destroyed after the email is sent so it no longer appears in the Drafts folder."
+          },
+          "to": {
+            "description": "Recipients. Optional — when omitted, derived from the original message's sender (its Reply-To, falling back to From). When given, used as-is, e.g. after the caller edited the pre-filled recipient.",
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/EmailAddressDto" }
+          },
+          "subject": {
+            "type": "string",
+            "example": "Re: Weekly sync notes",
+            "description": "Subject of the reply. Optional — when omitted, a `Re:`-prefixed subject is derived from the original email."
+          },
+          "replyAll": {
+            "type": "boolean",
+            "example": false,
+            "description": "When true, replies to everyone: the other participants of the original (its To and Cc, minus yourself and anyone already in To) are added to Cc."
+          }
+        }
+      },
+      "DraftEmailRequestDto": {
+        "type": "object",
+        "properties": {
+          "to": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/EmailAddressDto" }
+          },
+          "cc": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/EmailAddressDto" }
+          },
+          "bcc": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/EmailAddressDto" }
+          },
+          "subject": { "type": "string", "example": "Draft: project update" },
+          "textBody": { "type": "string", "example": "Still working on this…" },
+          "htmlBody": {
+            "type": "string",
+            "example": "<p>Still working on this…</p>"
+          },
+          "encryption": {
+            "description": "When present, the draft body is stored encrypted. Only the sender can decrypt it later, so wrappedKeys should contain a single entry built from the sender's own public key.",
+            "allOf": [{ "$ref": "#/components/schemas/EncryptionBlockDto" }]
+          },
+          "attachments": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/AttachmentRefDto" }
+          }
+        }
+      },
+      "UploadAttachmentResponseDto": {
+        "type": "object",
+        "properties": {
+          "blobId": { "type": "string", "example": "T1a2b3c…" },
+          "size": {
+            "type": "number",
+            "example": 4096,
+            "description": "Size in bytes"
+          },
+          "type": { "type": "string", "example": "image/jpeg" },
+          "name": { "type": "string", "example": "photo.jpg" }
+        },
+        "required": ["blobId", "size", "type", "name"]
+      },
+      "UpdateEmailRequestDto": {
+        "type": "object",
+        "properties": {
+          "mailbox": {
+            "type": "string",
+            "enum": ["inbox", "drafts", "sent", "trash", "spam", "archive"],
+            "description": "Move the email to this mailbox",
+            "example": "trash"
+          },
+          "isRead": {
+            "type": "boolean",
+            "description": "Mark the email as read or unread",
+            "example": true
+          },
+          "isFlagged": {
+            "type": "boolean",
+            "description": "Flag or unflag the email",
+            "example": false
+          }
+        }
+      },
+      "MailAccountState": { "type": "string", "enum": ["active", "suspended"] },
+      "MailAccountStatusResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "f3a1b2c4-1234-4abc-9def-0123456789ab"
+          },
+          "defaultAddress": {
+            "type": "string",
+            "nullable": true,
+            "example": "alice@inxt.eu",
+            "description": "Default address of the account, null if none is set"
+          },
+          "status": {
+            "example": "active",
+            "allOf": [{ "$ref": "#/components/schemas/MailAccountState" }]
+          },
+          "suspendedAt": {
+            "type": "string",
+            "nullable": true,
+            "example": "2026-05-01T10:29:55.000Z",
+            "description": "When the account was suspended; null when active"
+          },
+          "deletionAt": {
+            "type": "string",
+            "nullable": true,
+            "example": "2026-05-31T10:29:55.000Z",
+            "description": "Scheduled deletion date for suspended accounts; null when active"
+          }
+        },
+        "required": ["id", "status"]
+      },
+      "MailAddressKeyBundleDto": {
+        "type": "object",
+        "properties": {
+          "publicKey": {
+            "type": "string",
+            "description": "Hybrid (X25519 + ML-KEM-768) public key, base64-encoded"
+          },
+          "encryptionPrivateKey": {
+            "type": "string",
+            "description": "Private key encrypted with the encryption keystore key (base64)"
+          },
+          "recoveryPrivateKey": {
+            "type": "string",
+            "description": "Private key encrypted with the recovery keystore key (base64)"
+          }
+        },
+        "required": ["publicKey", "encryptionPrivateKey", "recoveryPrivateKey"]
+      },
+      "CreateMailAccountDto": {
+        "type": "object",
+        "properties": {
+          "address": { "type": "string", "example": "alice" },
+          "domain": { "type": "string", "example": "inxt.eu" },
+          "displayName": { "type": "string", "example": "Alice Smith" },
+          "keys": { "$ref": "#/components/schemas/MailAddressKeyBundleDto" }
+        },
+        "required": ["address", "domain", "displayName", "keys"]
+      },
+      "CreateMailAccountResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "f3a1b2c4-1234-4abc-9def-0123456789ab"
+          },
+          "address": { "type": "string", "example": "alice@inxt.eu" },
+          "domain": { "type": "string", "example": "inxt.eu" }
+        },
+        "required": ["id", "address", "domain"]
+      },
+      "MailAccountKeysResponseDto": {
+        "type": "object",
+        "properties": {
+          "address": { "type": "string", "example": "alice@inxt.eu" },
+          "publicKey": {
+            "type": "string",
+            "description": "Hybrid (X25519 + ML-KEM-768) public key, base64-encoded"
+          },
+          "encryptionPrivateKey": {
+            "type": "string",
+            "description": "Private key encrypted with the encryption keystore key (base64)"
+          },
+          "recoveryPrivateKey": {
+            "type": "string",
+            "description": "Private key encrypted with the recovery keystore key (base64)"
+          }
+        },
+        "required": [
+          "address",
+          "publicKey",
+          "encryptionPrivateKey",
+          "recoveryPrivateKey"
+        ]
+      }
+    }
+  }
+}
