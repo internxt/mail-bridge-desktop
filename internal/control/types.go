@@ -7,8 +7,6 @@ import (
 	"time"
 )
 
-const startupTimeout = 30 * time.Second
-
 // Session is supplied by the parent after it has authenticated and unlocked an
 // account. BackendSession is opaque until the production backend adapter
 // defines its typed schema.
