@@ -8,7 +8,6 @@ type EncryptedEmail struct {
 	AttachmentsSessionKey []byte
 }
 
-// Email is a decrypted email body.
 type Email struct {
 	Text                  string
 	Preview               string
