@@ -22,7 +22,7 @@ type ListEmailsOptions struct {
 	Mailbox  Mailbox
 	Limit    int
 	Position int
-	AnchorId string
+	AnchorID string
 	Unread   *bool
 }
 
@@ -42,8 +42,8 @@ func (o ListEmailsOptions) query() url.Values {
 		q.Set("position", strconv.Itoa(o.Position))
 	}
 
-	if o.AnchorId != "" {
-		q.Set("anchorId", o.AnchorId)
+	if o.AnchorID != "" {
+		q.Set("anchorId", o.AnchorID)
 	}
 
 	if o.Unread != nil {
@@ -61,6 +61,32 @@ func (c *Client) GetUserFolder(ctx context.Context, token string, opts ListEmail
 		method: http.MethodGet,
 		path:   "/email",
 		query:  opts.query(),
+		token:  token,
+	}, &res)
+
+	return res, err
+}
+
+func (c *Client) GetMailboxes(ctx context.Context, token string) ([]MailboxResponseDto, error) {
+	var res []MailboxResponseDto
+
+	err := c.do(ctx, request{
+		svc:    c.mail,
+		method: http.MethodGet,
+		path:   "/email/mailboxes",
+		token:  token,
+	}, &res)
+
+	return res, err
+}
+
+func (c *Client) GetThread(ctx context.Context, token, threadID string) ([]EmailResponseDto, error) {
+	var res []EmailResponseDto
+
+	err := c.do(ctx, request{
+		svc:    c.mail,
+		method: http.MethodGet,
+		path:   "/email/threads/" + url.PathEscape(threadID),
 		token:  token,
 	}, &res)
 

@@ -8,7 +8,6 @@ import (
 
 	"mail-bridge-desktop/internal/config"
 	"mail-bridge-desktop/internal/logger"
-	"mail-bridge-desktop/internal/store"
 )
 
 const (
@@ -38,7 +37,7 @@ type Client struct {
 	log   *logger.Logger
 }
 
-func New(cfg config.Config, log *logger.Logger, store *store.Store) (*Client, error) {
+func New(cfg config.Config, log *logger.Logger) (*Client, error) {
 	if cfg.MailAPI == "" {
 		return nil, errors.New("api: MAIL_API_URL is not set")
 	}
