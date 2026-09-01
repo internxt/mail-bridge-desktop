@@ -16,6 +16,8 @@ func main() {
 	context, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	
+
 	if err := daemon.Run(context, options); err != nil {
 		fmt.Fprintln(os.Stderr, "bridge:", err)
 		os.Exit(1)
