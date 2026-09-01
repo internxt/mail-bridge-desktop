@@ -3,6 +3,7 @@ package smtpserver
 import (
 	"bytes"
 	"context"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"io"
@@ -22,28 +23,14 @@ const (
 	ioTimeout       = 60 * time.Second
 )
 
-type backend struct {
-	log *logger.Logger
-}
-
-// session implements smtp.Session and smtp.AuthSession. For now it only logs
-// the dialogue: there is nowhere to deliver the mail yet.
-type session struct {
-	log  *logger.Logger
-	from string
-	to   []string
-}
-
-type Service struct {
-	srv *smtp.Server
-	log *logger.Logger
-}
-
-
-func New(cfg config.Config) *Service {
+func New(cfg config.Config, credentials ...Credentials) *Service {
 	log := logger.New("smtp")
+	localCredentials := Credentials{}
+	if len(credentials) > 0 {
+		localCredentials = credentials[0]
+	}
 
-	srv := smtp.NewServer(&backend{log: log})
+	srv := smtp.NewServer(&backend{log: log, credentials: localCredentials})
 	srv.Addr = cfg.SMTPAddr
 	srv.Domain = cfg.SMTPDomain
 	// Cleartext credentials: only acceptable because we listen on loopback.
@@ -61,21 +48,28 @@ func New(cfg config.Config) *Service {
 
 func (b *backend) NewSession(c *smtp.Conn) (smtp.Session, error) {
 	b.log.Info("connection from %v", c.Conn().RemoteAddr())
-	return &session{log: b.log}, nil
+	return &session{log: b.log, credentials: b.credentials}, nil
 }
 
-
 func (s *session) AuthMechanisms() []string { return []string{sasl.Plain} }
-
 
 // Commands form the SMTP server that are not implemented by the API/Crypto.
 func (s *session) Auth(mech string) (sasl.Server, error) {
 	if mech != sasl.Plain {
 		return nil, smtp.ErrAuthUnsupported
 	}
-	// TODO: validate against internal/api. For now any credential is accepted.
+	// An empty credential set preserves development compatibility for callers
+	// that have not yet adopted the authenticated startup flow.
 	return sasl.NewPlainServer(func(identity, username, password string) error {
-		s.log.Info("auth plain from %s (accepted without validation)", username)
+		if s.credentials.Password == "" {
+			s.log.Info("auth plain from %s (development mode)", username)
+			return nil
+		}
+		if subtle.ConstantTimeCompare([]byte(username), []byte(s.credentials.Username)) != 1 ||
+			subtle.ConstantTimeCompare([]byte(password), []byte(s.credentials.Password)) != 1 {
+			return errors.New("invalid local bridge credentials")
+		}
+		s.log.Info("auth plain from %s", username)
 		return nil
 	}), nil
 }
@@ -91,7 +85,6 @@ func (s *session) Rcpt(to string, opts *smtp.RcptOptions) error {
 	s.log.Info("rcpt to %s", to)
 	return nil
 }
-
 
 func (s *session) Data(r io.Reader) error {
 	// TODO: hand off to internal/api. Discarded until the connector exists.
@@ -109,7 +102,6 @@ func (s *session) Reset() {
 }
 
 func (s *session) Logout() error { return nil }
-
 
 // Actions to Start/Stop de SMTP server.
 
@@ -138,14 +130,8 @@ func (s *Service) Stop(ctx context.Context) error {
 	return nil
 }
 
-// smtpLogger adapts our logger to the interface go-smtp expects.
-type smtpLogger struct{ log *logger.Logger }
-
 func (l smtpLogger) Printf(format string, v ...any) { l.log.Error(format, v...) }
 func (l smtpLogger) Println(v ...any)               { l.log.Error("%s", fmt.Sprintln(v...)) }
-
-// debugWriter dumps the SMTP dialogue to the logger while debugging.
-type debugWriter struct{ log *logger.Logger }
 
 func (w debugWriter) Write(p []byte) (int, error) {
 	w.log.Info("%s", bytes.TrimRight(p, "\r\n"))
