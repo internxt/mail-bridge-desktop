@@ -25,5 +25,6 @@ func Load() Config {
 		IMAPAddr:   net.JoinHostPort(host, env("BRIDGE_IMAP_PORT", "1143")),
 		SMTPAddr:   net.JoinHostPort(host, env("BRIDGE_SMTP_PORT", "2025")),
 		SMTPDomain: env("BRIDGE_SMTP_DOMAIN", "localhost"),
+		MailAPI:    env("MAIL_API_URL", ""),
 	}
 }

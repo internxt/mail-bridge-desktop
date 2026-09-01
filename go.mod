@@ -7,6 +7,7 @@ require (
 	github.com/emersion/go-sasl v0.0.0-20241020182733-b788ff22d5a6
 	github.com/emersion/go-smtp v0.25.0
 	github.com/joho/godotenv v1.5.1
+	github.com/zalando/go-keyring v0.2.8
 )
 
 require (
@@ -18,7 +19,6 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.17 // indirect
 	github.com/pierrec/lz4/v4 v4.1.17 // indirect
 	github.com/sirupsen/logrus v1.9.0 // indirect
-	github.com/zalando/go-keyring v0.2.8 // indirect
 	golang.org/x/exp v0.0.0-20230213192124-5e25df0256eb // indirect
 	golang.org/x/sync v0.1.0 // indirect
 	golang.org/x/sys v0.27.0 // indirect
