@@ -5,8 +5,6 @@ import (
 	"os"
 )
 
-type Logger struct{ l *log.Logger }
-
 func New(scope string) *Logger {
 	return &Logger{l: log.New(os.Stderr, "["+scope+"] ", log.LstdFlags|log.Lmsgprefix)}
 }
