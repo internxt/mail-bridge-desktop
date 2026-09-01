@@ -5,4 +5,5 @@ type Config struct {
 	IMAPAddr   string
 	SMTPAddr   string
 	SMTPDomain string
+	MailAPI    string
 }
