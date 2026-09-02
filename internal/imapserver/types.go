@@ -56,9 +56,14 @@ type Config struct {
 // IMAPServer owns a running IMAP service, its listener, and its local client
 // credentials.
 type IMAPServer struct {
-	mutex       sync.Mutex
-	server      *gluon.Server
-	listener    net.Listener
+	mutex    sync.Mutex
+	server   *gluon.Server
+	listener net.Listener
+
+	// stopServing ends the context Gluon serves under. It is deliberately not
+	// the caller's context: see the note in Start.
+	stopServing context.CancelFunc
+
 	status      Status
 	credentials []byte
 	started     bool

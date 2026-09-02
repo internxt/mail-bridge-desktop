@@ -68,6 +68,19 @@ func (client *Client) SendError(requestID, code string) error {
 	})
 }
 
+// Backend decodes the account material the parent sent.
+//
+// It is a method rather than a field because BackendSession travels as opaque
+// JSON: the framing carries it without looking inside, and only callers that
+// need the account read it.
+func (session Session) Backend() (BackendSession, error) {
+	var backend BackendSession
+	if err := json.Unmarshal(session.BackendSession, &backend); err != nil {
+		return BackendSession{}, fmt.Errorf("decode backend session: %w", err)
+	}
+	return backend, nil
+}
+
 // Close closes the control channel. Task 3 will also use channel closure to
 // cancel the daemon and clear its in-memory session material.
 func (client *Client) Close() error { return client.connection.Close() }

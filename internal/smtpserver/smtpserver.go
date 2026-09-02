@@ -23,14 +23,12 @@ const (
 	ioTimeout       = 60 * time.Second
 )
 
-func New(cfg config.Config, credentials ...Credentials) *Service {
+// New builds the SMTP service. The credentials are the local ones the parent
+// issued for this account, the same pair the IMAP side accepts.
+func New(cfg config.Config, credentials Credentials) *Service {
 	log := logger.New("smtp")
-	localCredentials := Credentials{}
-	if len(credentials) > 0 {
-		localCredentials = credentials[0]
-	}
 
-	srv := smtp.NewServer(&backend{log: log, credentials: localCredentials})
+	srv := smtp.NewServer(&backend{log: log, credentials: credentials})
 	srv.Addr = cfg.SMTPAddr
 	srv.Domain = cfg.SMTPDomain
 	// Cleartext credentials: only acceptable because we listen on loopback.
