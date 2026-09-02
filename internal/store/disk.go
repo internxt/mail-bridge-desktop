@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	dekSuffix = ".dek"
+	dekSuffix   = ".dek"
 	dekLenBytes = 32 // AES-256
 )
 

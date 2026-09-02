@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"sync"
 
 	"github.com/zalando/go-keyring"
 )
@@ -36,7 +37,12 @@ func (keychain) Remove(key string) error {
 
 // memoryKeychain is an in-memory stand-in used by tests, so they never touch
 // the real keychain (which does not exist on CI machines).
+//
+// The real keychain is safe to use from several goroutines, so this one locks
+// too: without it a test exercising concurrent access would fail under -race
+// for a reason that has nothing to do with what it is testing.
 type memoryKeychain struct {
+	mu     sync.Mutex
 	values map[string][]byte
 }
 
@@ -45,6 +51,9 @@ func newMemoryKeychain() *memoryKeychain {
 }
 
 func (m *memoryKeychain) Get(key string) ([]byte, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	v, ok := m.values[key]
 	if !ok {
 		return nil, ErrNotFound
@@ -56,11 +65,18 @@ func (m *memoryKeychain) Set(key string, value []byte) error {
 	if len(value) > keychainMaxBytes {
 		return errors.New("store: value too big for the keychain")
 	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	m.values[key] = value
 	return nil
 }
 
 func (m *memoryKeychain) Remove(key string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	delete(m.values, key)
 	return nil
 }
