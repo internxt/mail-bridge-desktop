@@ -153,3 +153,4 @@ __pychache__/*
 *.pyc
 .DS_Store
 /bridge.exe
+.bridge-data
