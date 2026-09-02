@@ -21,25 +21,25 @@ import (
 // MaxFrameSize bounds memory allocated for an untrusted control message.
 const MaxFrameSize = 1 << 20
 
-// readMessage reads one complete framed message and decodes its JSON payload.
+// ReadMessage reads one complete framed message and decodes its JSON payload.
 // It rejects unknown fields and extra JSON values so both sides continue to
 // follow the same control-message contract.
-func readMessage(ctx context.Context, reader io.Reader) (message, error) {
+func ReadMessage(ctx context.Context, reader io.Reader) (Message, error) {
 	frame, err := readFrame(ctx, reader)
 	if err != nil {
-		return message{}, err
+		return Message{}, err
 	}
-	var decoded message
+	var decoded Message
 	decoder := json.NewDecoder(bytes.NewReader(frame))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&decoded); err != nil {
-		return message{}, fmt.Errorf("decode control message: %w", err)
+		return Message{}, fmt.Errorf("decode control message: %w", err)
 	}
 	if err := ensureEOF(decoder); err != nil {
-		return message{}, err
+		return Message{}, err
 	}
 	if decoded.Type == "" {
-		return message{}, errors.New("control message type is required")
+		return Message{}, errors.New("control message type is required")
 	}
 	return decoded, nil
 }
@@ -56,9 +56,9 @@ func ensureEOF(decoder *json.Decoder) error {
 	return nil
 }
 
-// writeMessage encodes one control message as JSON and sends it as one framed
+// WriteMessage encodes one control message as JSON and sends it as one framed
 // message, so the receiver can find its boundary in the byte stream.
-func writeMessage(ctx context.Context, writer io.Writer, message message) error {
+func WriteMessage(ctx context.Context, writer io.Writer, message Message) error {
 	payload, err := json.Marshal(message)
 	if err != nil {
 		return fmt.Errorf("encode control message: %w", err)
@@ -66,7 +66,7 @@ func writeMessage(ctx context.Context, writer io.Writer, message message) error 
 	return writeFrame(ctx, writer, payload)
 }
 
-// readFrame reads the message length first, then reads exactly that many payload bytes.
+// ReadFrame reads the message length first, then reads exactly that many payload bytes.
 // It checks the length before allocating memory for the payload.
 func readFrame(ctx context.Context, reader io.Reader) ([]byte, error) {
 	if err := setDeadline(ctx, reader); err != nil {

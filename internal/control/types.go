@@ -49,7 +49,7 @@ type SessionUpdate struct {
 	BackendSession json.RawMessage `json:"backend_session"`
 }
 
-type message struct {
+type Message struct {
 	Type      string         `json:"type"`
 	RequestID string         `json:"request_id,omitempty"`
 	Session   *Session       `json:"session,omitempty"`

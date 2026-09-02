@@ -22,7 +22,7 @@ func TestReadMessageRejectsUnknownFields(t *testing.T) {
 	if err := writeFrame(context.Background(), &framed, []byte(`{"type":"start_session","unknown":true}`)); err != nil {
 		t.Fatal(err)
 	}
-	_, err := readMessage(context.Background(), &framed)
+	_, err := ReadMessage(context.Background(), &framed)
 	if err == nil || !strings.Contains(err.Error(), "unknown field") {
 		t.Fatalf("expected unknown field error, got %v", err)
 	}
