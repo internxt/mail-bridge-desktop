@@ -69,7 +69,7 @@ The release also contains:
 
 - `manifest.json`, conforming to
   [`release/manifest.schema.json`](release/manifest.schema.json).
-- `checksums.txt`, with one line per release asset in standard SHA-256 format:
+- `checksums.txt`, with one line per binary archive in standard SHA-256 format:
   `<lowercase-hex-sha256>  <filename>`.
 
 The manifest is the consumption contract. Consumers select an entry by `os`
