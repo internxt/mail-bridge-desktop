@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"time"
@@ -81,6 +82,7 @@ func startIMAP(ctx context.Context, options Options, session control.Session) (*
 		},
 		StoragePassphrase: passphrase,
 		ConnectorFactory:  connectorFactory(options, session),
+		LogProtocol:       options.Config.LogImapProtocol,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("start IMAP: %w", err)
@@ -124,9 +126,31 @@ func mailService(options Options, session control.Session, log *logger.Logger) (
 	}
 
 	return mail.New(client, mail.Account{
-		Token:   backend.Token,
-		Address: session.Addresses[0],
+		Token:      backend.Token,
+		Address:    session.Addresses[0],
+		PrivateKey: encryptionKey(backend.EncryptionPrivateKey, log),
 	}, log), nil
+}
+
+const privateKeyLen = 32
+
+// We need to decode the base64 encryption key
+func encryptionKey(encoded string, log *logger.Logger) []byte {
+	if encoded == "" {
+		return nil
+	}
+
+	key, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		log.Warn("serving mail undecrypted: decode encryption private key: %v", err)
+		return nil
+	}
+	if len(key) != privateKeyLen {
+		log.Warn("serving mail undecrypted: encryption private key is %d bytes, want %d", len(key), privateKeyLen)
+		return nil
+	}
+
+	return key
 }
 
 // storagePassphrase reads the key encrypting Gluon's message cache, generating

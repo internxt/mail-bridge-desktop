@@ -12,6 +12,7 @@ import (
 	"github.com/ProtonMail/gluon"
 
 	bridgeconfig "mail-bridge-desktop/internal/config"
+	"mail-bridge-desktop/internal/logger"
 )
 
 // Start prepares the IMAP service, makes the mailbox available to email
@@ -93,6 +94,14 @@ func createGluonServer(config Config) (*gluon.Server, error) {
 	}
 	if config.TLSConfig != nil {
 		options = append(options, gluon.WithTLS(config.TLSConfig))
+	}
+
+	if config.LogProtocol {
+		log := logger.New("imap")
+		options = append(options, gluon.WithLogger(
+			newProtocolLogger(log, fromClient),
+			newProtocolLogger(log, fromServer),
+		))
 	}
 
 	gluonServer, err := gluon.New(options...)

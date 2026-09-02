@@ -50,3 +50,25 @@ func (s *MailService) ListEmails(ctx context.Context, opts api.ListEmailsOptions
 func (s *MailService) ListAllEmails(ctx context.Context, opts api.ListEmailsOptions) ([]api.EmailSummaryResponseDto, error) {
 	return commands.ListAllEmails(ctx, s.api, s.account.Token, opts)
 }
+
+// GetMessageLiteral returns one email as the RFC 5322 message a mail client
+// expects, with its body decrypted when the account holds the keys.
+func (s *MailService) GetMessageLiteral(ctx context.Context, emailID string) ([]byte, error) {
+	email, decryptErr := commands.GetEmail(ctx, s.api, s.account.Token, emailID, s.decryptionAccount())
+	if email.Id == "" {
+		return nil, decryptErr
+	}
+
+	literal, err := BuildLiteral(email)
+	if err != nil {
+		return nil, err
+	}
+	return literal, decryptErr
+}
+
+func (s *MailService) decryptionAccount() commands.Account {
+	return commands.Account{
+		Address:    s.account.Address,
+		PrivateKey: s.account.PrivateKey,
+	}
+}

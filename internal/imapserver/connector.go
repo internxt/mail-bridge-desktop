@@ -15,11 +15,15 @@ import (
 type MailService interface {
 	ListMailboxes(ctx context.Context) ([]api.MailboxResponseDto, error)
 	ListAllEmails(ctx context.Context, opts api.ListEmailsOptions) ([]api.EmailSummaryResponseDto, error)
+
+	// GetMessageLiteral returns one email as an RFC 5322 message, decrypted.
+	GetMessageLiteral(ctx context.Context, emailID string) ([]byte, error)
 }
 
 type mailConnector struct {
 	service MailService
 	log     *logger.Logger
+
 	updates chan imap.Update
 	// Closes the Gluon instance when the connector is closed.
 	closeOnce sync.Once
@@ -53,7 +57,14 @@ func (c *mailConnector) GetUpdates() <-chan imap.Update { return c.updates }
 // GetMessageLiteral is called when Gluon needs a message body it does not have
 // cached.
 func (c *mailConnector) GetMessageLiteral(ctx context.Context, id imap.MessageID) ([]byte, error) {
-	return nil, fmt.Errorf("message bodies are not available yet: %s", id)
+	literal, err := c.service.GetMessageLiteral(ctx, string(id))
+	if literal == nil {
+		return nil, fmt.Errorf("fetch message %s: %w", id, err)
+	}
+	if err != nil {
+		c.log.Warn("serving message %s undecrypted: %v", id, err)
+	}
+	return literal, nil
 }
 
 func (c *mailConnector) Close(ctx context.Context) error {
@@ -78,6 +89,14 @@ func (c *mailConnector) Sync(ctx context.Context) error {
 	return nil
 }
 
+func (c *mailConnector) messageLiteral(ctx context.Context, summary api.EmailSummaryResponseDto) []byte {
+	literal, err := c.service.GetMessageLiteral(ctx, summary.Id)
+	if err != nil {
+		c.log.Warn("serving message %s without its body: %v", summary.Id, err)
+	}
+	return literal
+}
+
 // syncMailbox announces one folder and the messages it holds.
 func (c *mailConnector) syncMailbox(ctx context.Context, mailbox api.MailboxResponseDto) error {
 	c.updates <- imap.NewMailboxCreated(toIMAPMailbox(mailbox))
@@ -91,7 +110,7 @@ func (c *mailConnector) syncMailbox(ctx context.Context, mailbox api.MailboxResp
 
 	messages := make([]*imap.MessageCreated, 0, len(summaries))
 	for _, summary := range summaries {
-		message, err := toIMAPMessage(mailbox, summary)
+		message, err := toIMAPMessage(mailbox, summary, c.messageLiteral(ctx, summary))
 		if err != nil {
 			c.log.Warn("skipping message %s: %v", summary.Id, err)
 			continue
