@@ -1,0 +1,133 @@
+name: Release bridge binaries
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-latest
+            target: windows-amd64
+            os: windows
+            arch: amd64
+          - runner: ubuntu-latest
+            target: linux-amd64
+            os: linux
+            arch: amd64
+          - runner: macos-14
+            target: darwin-arm64
+            os: darwin
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      # CGO builds on Windows need the Visual C++ toolchain that is installed
+      # on the GitHub-hosted runner.
+      - name: Set up the Windows C compiler
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Test
+        env:
+          CGO_ENABLED: "1"
+        run: go test ./...
+
+      - name: Build and archive (Linux and macOS)
+        if: runner.os != 'Windows'
+        env:
+          CGO_ENABLED: "1"
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          TARGET_OS: ${{ matrix.os }}
+          TARGET_ARCH: ${{ matrix.arch }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          mkdir -p dist/package
+          go build -trimpath -ldflags='-s -w' -o dist/package/mail-bridge ./cmd/bridge
+          test -f dist/package/mail-bridge
+          tar -C dist/package -czf "dist/mail-bridge_${version}_${TARGET_OS}_${TARGET_ARCH}.tar.gz" mail-bridge
+
+      - name: Build and archive (Windows)
+        if: runner.os == 'Windows'
+        env:
+          CGO_ENABLED: "1"
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          TARGET_OS: ${{ matrix.os }}
+          TARGET_ARCH: ${{ matrix.arch }}
+        shell: pwsh
+        run: |
+          $version = $env:RELEASE_TAG -replace '^v', ''
+          New-Item -ItemType Directory -Force -Path dist/package | Out-Null
+          go build -trimpath -ldflags="-s -w" -o dist/package/mail-bridge.exe ./cmd/bridge
+          if (-not (Test-Path dist/package/mail-bridge.exe -PathType Leaf)) {
+            throw "mail-bridge.exe was not produced"
+          }
+          Compress-Archive -Path dist/package/mail-bridge.exe -DestinationPath "dist/mail-bridge_$($version)_$($env:TARGET_OS)_$($env:TARGET_ARCH).zip" -Force
+
+      - name: Upload ${{ matrix.target }} archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: dist/mail-bridge_*
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download release archives
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: release
+          merge-multiple: true
+
+      - name: Generate manifest and checksums
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          ./scripts/generate-release-manifest.sh \
+            "$version" \
+            "https://github.com/${REPOSITORY}/releases/download/${RELEASE_TAG}" \
+            release
+
+      - name: Publish release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          gh release create "$RELEASE_TAG" release/* \
+            --title "Mail Bridge $RELEASE_TAG" \
+            --generate-notes
