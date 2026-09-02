@@ -16,20 +16,20 @@ import (
 	"mail-bridge-desktop/internal/store"
 )
 
-// Service turns stored credentials into Mail API calls.
-type Service struct {
+// MailService turns stored credentials into Mail API calls.
+type MailService struct {
 	api   *api.Client
 	store *store.Store
 }
 
-func New(client *api.Client, credentials *store.Store) *Service {
-	return &Service{api: client, store: credentials}
+func New(client *api.Client, credentials *store.Store) *MailService {
+	return &MailService{api: client, store: credentials}
 }
 
 // ListEmails returns one page of emails from a folder.
 //
 // TODO(crypto): decrypt the encrypted summaries before returning them.
-func (s *Service) ListEmails(ctx context.Context, opts api.ListEmailsOptions) (api.EmailListResponseDto, error) {
+func (s *MailService) ListEmails(ctx context.Context, opts api.ListEmailsOptions) (api.EmailListResponseDto, error) {
 	token, err := s.token()
 	if err != nil {
 		return api.EmailListResponseDto{}, err
@@ -43,7 +43,7 @@ func (s *Service) ListEmails(ctx context.Context, opts api.ListEmailsOptions) (a
 }
 
 // token reads the account token from the store.
-func (s *Service) token() (string, error) {
+func (s *MailService) token() (string, error) {
 	value, err := s.store.Get(store.KeyToken)
 	if err != nil {
 		return "", fmt.Errorf("mail: read token: %w", err)

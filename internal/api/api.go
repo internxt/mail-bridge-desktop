@@ -7,24 +7,11 @@ import (
 	"strconv"
 )
 
-type Mailbox = MailboxResponseDtoType
-
 const (
-	MailboxInbox   = MailboxResponseDtoTypeInbox
-	MailboxDrafts  = MailboxResponseDtoTypeDrafts
-	MailboxSent    = MailboxResponseDtoTypeSent
-	MailboxTrash   = MailboxResponseDtoTypeTrash
-	MailboxSpam    = MailboxResponseDtoTypeSpam
-	MailboxArchive = MailboxResponseDtoTypeArchive
+	emailPath          string = "/email"
+	emailMailboxesPath string = emailPath + "/mailboxes"
+	emailThreadsPath   string = emailPath + "/threads/"
 )
-
-type ListEmailsOptions struct {
-	Mailbox  Mailbox
-	Limit    int
-	Position int
-	AnchorID string
-	Unread   *bool
-}
 
 func (o ListEmailsOptions) query() url.Values {
 	q := url.Values{}
@@ -59,7 +46,7 @@ func (c *Client) GetUserFolder(ctx context.Context, token string, opts ListEmail
 	err := c.do(ctx, request{
 		svc:    c.mail,
 		method: http.MethodGet,
-		path:   "/email",
+		path:   emailPath,
 		query:  opts.query(),
 		token:  token,
 	}, &res)
@@ -73,7 +60,7 @@ func (c *Client) GetMailboxes(ctx context.Context, token string) ([]MailboxRespo
 	err := c.do(ctx, request{
 		svc:    c.mail,
 		method: http.MethodGet,
-		path:   "/email/mailboxes",
+		path:   emailMailboxesPath,
 		token:  token,
 	}, &res)
 
@@ -86,7 +73,7 @@ func (c *Client) GetThread(ctx context.Context, token, threadID string) ([]Email
 	err := c.do(ctx, request{
 		svc:    c.mail,
 		method: http.MethodGet,
-		path:   "/email/threads/" + url.PathEscape(threadID),
+		path:   emailThreadsPath + url.PathEscape(threadID),
 		token:  token,
 	}, &res)
 

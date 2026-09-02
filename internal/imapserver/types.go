@@ -13,8 +13,8 @@ import (
 // UnlockedSession identifies an account whose authentication and encryption
 // keys have already been unlocked by the desktop application.
 //
-// TODO(auth): add the minimal key/session handle required by the production
-// connector. Do not add an account password to this type: passwords are used
+// TODO(auth): add the minimal key/session handle required by the production connector.
+// Do not add an account password to this type: passwords are used
 // only by the application while unlocking this session.
 type UnlockedSession struct {
 	AccountID string
@@ -52,6 +52,7 @@ type Config struct {
 	StoragePassphrase []byte
 	ConnectorFactory  ConnectorFactory
 }
+
 // IMAPServer owns a running IMAP service, its listener, and its local client
 // credentials.
 type IMAPServer struct {

@@ -7,14 +7,6 @@ import (
 	"github.com/joho/godotenv"
 )
 
-type Config struct {
-	Host       string
-	IMAPAddr   string
-	SMTPAddr   string
-	SMTPDomain string
-	MailAPI    string
-}
-
 func env(key, def string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
