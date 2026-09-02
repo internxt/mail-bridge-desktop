@@ -32,14 +32,21 @@ func Start(ctx context.Context, session UnlockedSession, config Config) (*IMAPSe
 		return nil, err
 	}
 
-	listener, err := startServing(ctx, gluonServer, config.ListenAddress)
+	// Gluon serves under a context of its own rather than the caller's.
+	// The caller's context is cancelled when Close cancels this one after
+	// Gluon has stopped cleanly.
+	serveCtx, stopServing := context.WithCancel(context.WithoutCancel(ctx))
+
+	listener, err := startServing(serveCtx, gluonServer, config.ListenAddress)
 	if err != nil {
+		stopServing()
 		return nil, err
 	}
 
 	return &IMAPServer{
 		server:      gluonServer,
 		listener:    listener,
+		stopServing: stopServing,
 		credentials: []byte(config.LocalCredentials.Password),
 		started:     true,
 		status: Status{
@@ -169,8 +176,10 @@ func (s *IMAPServer) Close(ctx context.Context) error {
 	s.started = false
 	listener := s.listener
 	gluonServer := s.server
+	stopServing := s.stopServing
 	s.listener = nil
 	s.server = nil
+	s.stopServing = nil
 	clear(s.credentials)
 	s.credentials = nil
 	s.status.Credentials.Password = ""
@@ -183,6 +192,14 @@ func (s *IMAPServer) Close(ctx context.Context) error {
 	if gluonServer != nil {
 		result = errors.Join(result, gluonServer.Close(ctx))
 	}
+
+	// Last, and only once Gluon has written its state: this ends the context
+	// it serves under, so cancelling it earlier is what produced the "failed
+	// to close state" errors.
+	if stopServing != nil {
+		stopServing()
+	}
+
 	return result
 }
 
