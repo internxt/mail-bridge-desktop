@@ -153,4 +153,12 @@ __pychache__/*
 *.pyc
 .DS_Store
 /bridge.exe
-.bridge-data
+
+# Go build output
+/bin/
+/bridge
+
+# Bridge runtime state: Gluon's message cache and the store's encrypted files.
+# It holds the account's mail and is rebuilt on demand, so it never belongs in
+# the repository.
+.bridge-data/

@@ -9,6 +9,7 @@ import (
 	"mail-bridge-desktop/internal/control"
 	"mail-bridge-desktop/internal/imapserver"
 	"mail-bridge-desktop/internal/smtpserver"
+	"mail-bridge-desktop/internal/store"
 )
 
 const shutdownTimeout = 10 * time.Second
@@ -41,9 +42,12 @@ func Run(ctx context.Context, options Options) error {
 		_ = controlClient.SendError("", "start_smtp")
 		return err
 	}
+
+	imapStatus := imapService.Status()
 	if err := controlClient.SendReady(control.Ready{
-		IMAPAddress: imapService.Status().Address,
+		IMAPAddress: imapStatus.Address,
 		SMTPAddress: options.Config.SMTPAddr,
+		StartTLS:    imapStatus.StartTLS,
 	}); err != nil {
 		_ = smtpService.Stop(context.Background())
 		_ = imapService.Close(context.Background())
@@ -57,6 +61,11 @@ func Run(ctx context.Context, options Options) error {
 }
 
 func startIMAP(ctx context.Context, options Options, session control.Session) (*imapserver.IMAPServer, error) {
+	passphrase, err := storagePassphrase(options.StateDir)
+	if err != nil {
+		return nil, fmt.Errorf("start IMAP: %w", err)
+	}
+
 	// TODO(backend): use session.BackendSession in the production connector.
 	// Until that exists, the current connector remains fixture-only.
 	service, err := imapserver.Start(ctx, imapserver.UnlockedSession{
@@ -69,6 +78,7 @@ func startIMAP(ctx context.Context, options Options, session control.Session) (*
 			Username: session.MailClient.Username,
 			Password: session.MailClient.Password,
 		},
+		StoragePassphrase: passphrase,
 		ConnectorFactory: imapserver.NewDevelopmentConnectorFactory([][]byte{
 			[]byte("From: welcome@example.test\r\nTo: user@example.test\r\nSubject: Mail Bridge development server\r\n\r\nThe IMAP server is serving this local fixture message.\r\n"),
 		}),
@@ -77,6 +87,16 @@ func startIMAP(ctx context.Context, options Options, session control.Session) (*
 		return nil, fmt.Errorf("start IMAP: %w", err)
 	}
 	return service, nil
+}
+
+// storagePassphrase reads the key encrypting Gluon's message cache, generating
+// and storing it the first time.
+func storagePassphrase(stateDir string) ([]byte, error) {
+	credentials, err := store.New(stateDir)
+	if err != nil {
+		return nil, err
+	}
+	return imapserver.EnsureStoragePassphrase(credentials)
 }
 
 func startSMTP(options Options, session control.Session) (*smtpserver.Service, error) {
@@ -92,7 +112,6 @@ func startSMTP(options Options, session control.Session) (*smtpserver.Service, e
 
 func reportStarted() {
 	fmt.Println("Bridge started after authenticated Drive Desktop startup handshake.")
-	fmt.Println("IMAP serves development fixture mail; SMTP accepts development submissions but does not deliver them yet.")
 	fmt.Println("Press Ctrl+C to stop.")
 }
 

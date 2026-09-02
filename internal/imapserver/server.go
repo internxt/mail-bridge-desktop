@@ -3,7 +3,6 @@ package imapserver
 import (
 	"context"
 	"crypto/rand"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"net"
@@ -61,15 +60,13 @@ func resolveConfig(session UnlockedSession, config Config) (Config, error) {
 	if config.LocalCredentials.Username == "" {
 		config.LocalCredentials.Username = session.Addresses[0]
 	}
-	if config.LocalCredentials.Password == "" {
-		password, err := randomToken(32)
-		if err != nil {
-			return Config{}, fmt.Errorf("generate local IMAP password: %w", err)
-		}
-		config.LocalCredentials.Password = password
-	}
+
+	// A generated passphrase only suits a throwaway server: Gluon's cache is
+	// encrypted with it, so a new one on every start leaves the existing cache
+	// unreadable and resynchronises every mailbox. Callers meant to outlive a
+	// single run pass a stored one, from EnsureStoragePassphrase.
 	if len(config.StoragePassphrase) == 0 {
-		passphrase, err := randomBytes(32)
+		passphrase, err := randomBytes(storagePassphraseBytes)
 		if err != nil {
 			return Config{}, fmt.Errorf("generate IMAP storage passphrase: %w", err)
 		}
@@ -103,10 +100,21 @@ func connectMailbox(ctx context.Context, gluonServer *gluon.Server, session Unlo
 	if err != nil {
 		return fmt.Errorf("create mailbox connector: %w", err)
 	}
+
+	// Whether the connector can synchronise is asked of the original, not of
+	// the wrapper below: authConnector embeds the Connector interface, which
+	// does not declare Sync, so the method is not promoted and a type
+	// assertion on the wrapper would quietly find nothing.
+	synchronizer, canSync := conn.(interface{ Sync(context.Context) error })
+
+	// Authorisation is enforced here rather than left to each connector, so
+	// every mailbox is reached through the same check.
+	conn = withAuthorization(conn, config.LocalCredentials)
+
 	if _, err := gluonServer.AddUser(ctx, conn, config.StoragePassphrase); err != nil {
 		return fmt.Errorf("add IMAP user: %w", err)
 	}
-	if synchronizer, ok := conn.(interface{ Sync(context.Context) error }); ok {
+	if canSync {
 		if err := synchronizer.Sync(ctx); err != nil {
 			return fmt.Errorf("perform initial mailbox sync: %w", err)
 		}
@@ -191,6 +199,9 @@ func validate(session UnlockedSession, config Config) error {
 	if config.ConnectorFactory == nil {
 		return errors.New("IMAP connector factory is required")
 	}
+	if config.LocalCredentials.Password == "" {
+		return errors.New("local IMAP password is required")
+	}
 	if config.ListenAddress != "" {
 		host, _, err := net.SplitHostPort(config.ListenAddress)
 		if err != nil {
@@ -201,14 +212,6 @@ func validate(session UnlockedSession, config Config) error {
 		}
 	}
 	return nil
-}
-
-func randomToken(size int) (string, error) {
-	value, err := randomBytes(size)
-	if err != nil {
-		return "", err
-	}
-	return base64.RawURLEncoding.EncodeToString(value), nil
 }
 
 func randomBytes(size int) ([]byte, error) {

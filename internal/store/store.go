@@ -12,7 +12,7 @@ import (
 const (
 	dirPerm  os.FileMode = 0o700
 	filePerm os.FileMode = 0o600
-	indexKey = "__index"
+	indexKey             = "__index"
 )
 
 type Store struct {
@@ -83,7 +83,7 @@ func (s *Store) Clear() error {
 	if err != nil {
 		return err
 	}
-	
+
 	var errs []error
 	for _, key := range keys {
 		if err := s.backend.Remove(key); err != nil {

@@ -17,8 +17,9 @@ func TestStartServesDevelopmentMailbox(t *testing.T) {
 		AccountID: "account-1",
 		Addresses: []string{"user@example.test"},
 	}, Config{
-		ListenAddress: "127.0.0.1:0",
-		DataDir:       t.TempDir(),
+		ListenAddress:    "127.0.0.1:0",
+		DataDir:          t.TempDir(),
+		LocalCredentials: Credentials{Password: "local-password"},
 		ConnectorFactory: NewDevelopmentConnectorFactory([][]byte{
 			[]byte("From: sender@example.test\r\nTo: user@example.test\r\nSubject: fixture\r\n\r\nHello from Gluon.\r\n"),
 		}),
@@ -33,8 +34,8 @@ func TestStartServesDevelopmentMailbox(t *testing.T) {
 	})
 
 	status := server.Status()
-	if status.Credentials.Password == "" {
-		t.Fatal("generated IMAP password is empty")
+	if status.Credentials.Password != "local-password" {
+		t.Fatalf("Status() password = %q, want the one it was started with", status.Credentials.Password)
 	}
 	if status.StartTLS {
 		t.Fatal("STARTTLS is unexpectedly enabled without a TLS configuration")
@@ -81,10 +82,27 @@ func TestStartRejectsNonLoopbackListener(t *testing.T) {
 	}, Config{
 		ListenAddress:    "0.0.0.0:1143",
 		DataDir:          t.TempDir(),
+		LocalCredentials: Credentials{Password: "local-password"},
 		ConnectorFactory: NewDevelopmentConnectorFactory(nil),
 	})
 	if err == nil || !strings.Contains(err.Error(), "loopback") {
 		t.Fatalf("Start() error = %v, want loopback validation error", err)
+	}
+}
+
+func TestStartRequiresPassword(t *testing.T) {
+	t.Parallel()
+
+	_, err := Start(context.Background(), UnlockedSession{
+		AccountID: "account-1",
+		Addresses: []string{"user@example.test"},
+	}, Config{
+		ListenAddress:    "127.0.0.1:0",
+		DataDir:          t.TempDir(),
+		ConnectorFactory: NewDevelopmentConnectorFactory(nil),
+	})
+	if err == nil || !strings.Contains(err.Error(), "password") {
+		t.Fatalf("Start() error = %v, want a missing password error", err)
 	}
 }
 
