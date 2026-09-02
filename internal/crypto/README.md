@@ -1,7 +1,6 @@
 # internal/crypto
 
-Reads Internxt's encrypted email. This is a port of the JS crypto library the
-web client uses, so the two have to agree byte for byte: anything this package
+This is a port of the [JS crypto library](https://github.com/internxt/crypto) the web client uses
 gets subtly wrong makes real mail unreadable.
 
 ## Why any of this exists
