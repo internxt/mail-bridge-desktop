@@ -33,7 +33,7 @@ func (client *Client) ReceiveStartSession(ctx context.Context) (Session, error) 
 	startupCtx, cancel := withStartupTimeout(ctx)
 	defer cancel()
 
-	message, err := readMessage(startupCtx, client.connection)
+	message, err := ReadMessage(startupCtx, client.connection)
 	if err != nil {
 		return Session{}, fmt.Errorf("read start session: %w", err)
 	}
@@ -52,7 +52,7 @@ func (client *Client) SendReady(ready Ready) error {
 	if ready.IMAPAddress == "" || ready.SMTPAddress == "" {
 		return errors.New("ready requires IMAP and SMTP addresses")
 	}
-	return client.send(context.Background(), message{Type: readyType, Ready: &ready})
+	return client.send(context.Background(), Message{Type: readyType, Ready: &ready})
 }
 
 // SendError reports a stable non-secret error code to the parent. Detailed
@@ -61,21 +61,34 @@ func (client *Client) SendError(requestID, code string) error {
 	if code == "" {
 		return errors.New("control error requires a code")
 	}
-	return client.send(context.Background(), message{
+	return client.send(context.Background(), Message{
 		Type:      errorType,
 		RequestID: requestID,
 		Error:     &ControlError{Code: code},
 	})
 }
 
+// Backend decodes the account material the parent sent.
+//
+// It is a method rather than a field because BackendSession travels as opaque
+// JSON: the framing carries it without looking inside, and only callers that
+// need the account read it.
+func (session Session) Backend() (BackendSession, error) {
+	var backend BackendSession
+	if err := json.Unmarshal(session.BackendSession, &backend); err != nil {
+		return BackendSession{}, fmt.Errorf("decode backend session: %w", err)
+	}
+	return backend, nil
+}
+
 // Close closes the control channel. Task 3 will also use channel closure to
 // cancel the daemon and clear its in-memory session material.
 func (client *Client) Close() error { return client.connection.Close() }
 
-func (client *Client) send(ctx context.Context, message message) error {
+func (client *Client) send(ctx context.Context, message Message) error {
 	client.writes.Lock()
 	defer client.writes.Unlock()
-	return writeMessage(ctx, client.connection, message)
+	return WriteMessage(ctx, client.connection, message)
 }
 
 func validateSession(session Session) error {

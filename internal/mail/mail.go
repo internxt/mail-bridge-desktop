@@ -1,52 +1,52 @@
-// Package mail sits between the transport and the storage layers: it reads
-// the account's credentials from the store, calls the Mail API with them and,
-// in time, decrypts what comes back.
+// Package mail sits between the transport and the storage layers: it holds
+// the account's session and calls the Mail API with it.
 //
 // Keeping this here is what lets internal/api stay pure transport and
-// internal/crypto stay pure cryptography: neither has to know where the user's
-// token or mnemonic live.
+// internal/crypto stay pure cryptography: neither has to know where the
+// account's token or keys come from.
+//
+// The operations themselves live in the commands subpackage, one per file.
 package mail
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 
 	"mail-bridge-desktop/internal/api"
-	"mail-bridge-desktop/internal/store"
+	"mail-bridge-desktop/internal/logger"
+	"mail-bridge-desktop/internal/mail/commands"
 )
 
-// MailService turns stored credentials into Mail API calls.
+// Account is the session the bridge acts for. It arrives from the parent over
+// the control channel and is held in memory only: nothing here is persisted,
+// so signing out is a matter of dropping the service.
+type Account struct {
+	Token      string
+	Address    string
+	PrivateKey []byte
+}
+
+// MailService turns an account session into Mail API calls.
 type MailService struct {
-	api   *api.Client
-	store *store.Store
+	api     commands.Client
+	account Account
+	log     *logger.Logger
 }
 
-func New(client *api.Client, credentials *store.Store) *MailService {
-	return &MailService{api: client, store: credentials}
+func New(client commands.Client, account Account, log *logger.Logger) *MailService {
+	return &MailService{api: client, account: account, log: log}
 }
 
-// ListEmails returns one page of emails from a folder.
-//
-// TODO(crypto): decrypt the encrypted summaries before returning them.
+// ListMailboxes returns the account's folders.
+func (s *MailService) ListMailboxes(ctx context.Context) ([]api.MailboxResponseDto, error) {
+	return commands.ListMailboxes(ctx, s.api, s.account.Token)
+}
+
+// ListEmails returns one page of email summaries from a folder.
 func (s *MailService) ListEmails(ctx context.Context, opts api.ListEmailsOptions) (api.EmailListResponseDto, error) {
-	token, err := s.token()
-	if err != nil {
-		return api.EmailListResponseDto{}, err
-	}
-	userFolder, err := s.api.GetUserFolder(ctx, token, opts)
-
-	pretty, _ := json.MarshalIndent(userFolder.Emails, "", "  ")
-	fmt.Printf("%s\n", pretty)
-
-	return userFolder, err
+	return commands.ListEmails(ctx, s.api, s.account.Token, opts)
 }
 
-// token reads the account token from the store.
-func (s *MailService) token() (string, error) {
-	value, err := s.store.Get(store.KeyToken)
-	if err != nil {
-		return "", fmt.Errorf("mail: read token: %w", err)
-	}
-	return string(value), nil
+// ListAllEmails returns every email in a folder, paging through the API.
+func (s *MailService) ListAllEmails(ctx context.Context, opts api.ListEmailsOptions) ([]api.EmailSummaryResponseDto, error) {
+	return commands.ListAllEmails(ctx, s.api, s.account.Token, opts)
 }

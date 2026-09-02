@@ -22,8 +22,15 @@ help:
 	@grep -E '^## ' $(MAKEFILE_LIST) | sed 's/## /  /'
 
 ## run: start the bridge
+##      Needs a parent on the control channel: run `make dev-control` first,
+##      in another terminal.
 run:
 	go run $(CMD)
+
+## dev-control: stand in for Drive Desktop, so the bridge can start locally
+##              It prints the settings a mail client needs once the bridge is up.
+dev-control:
+	go run ./cmd/devcontrol
 
 ## build: compile the bridge into bin/
 build:
@@ -32,6 +39,17 @@ build:
 ## test: run every test with the race detector
 test:
 	go test ./... -race
+
+## store-list: show which credentials are stored (names only, never values)
+store-list:
+	go run ./cmd/storectl list
+
+## store-clear: forget every stored credential
+##              Needed after editing the .env, since stored values are never
+##              overwritten. This also resets the bridge password, so mail
+##              clients have to be reconfigured.
+store-clear:
+	go run ./cmd/storectl clear
 
 ## check: what CI should agree with before a PR
 check: fmt vet test

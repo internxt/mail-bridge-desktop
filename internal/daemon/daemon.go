@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"time"
 
+	"mail-bridge-desktop/internal/api"
 	"mail-bridge-desktop/internal/control"
 	"mail-bridge-desktop/internal/imapserver"
+	"mail-bridge-desktop/internal/logger"
+	"mail-bridge-desktop/internal/mail"
 	"mail-bridge-desktop/internal/smtpserver"
 	"mail-bridge-desktop/internal/store"
 )
@@ -66,8 +69,6 @@ func startIMAP(ctx context.Context, options Options, session control.Session) (*
 		return nil, fmt.Errorf("start IMAP: %w", err)
 	}
 
-	// TODO(backend): use session.BackendSession in the production connector.
-	// Until that exists, the current connector remains fixture-only.
 	service, err := imapserver.Start(ctx, imapserver.UnlockedSession{
 		AccountID: session.AccountID,
 		Addresses: session.Addresses,
@@ -79,14 +80,53 @@ func startIMAP(ctx context.Context, options Options, session control.Session) (*
 			Password: session.MailClient.Password,
 		},
 		StoragePassphrase: passphrase,
-		ConnectorFactory: imapserver.NewDevelopmentConnectorFactory([][]byte{
-			[]byte("From: welcome@example.test\r\nTo: user@example.test\r\nSubject: Mail Bridge development server\r\n\r\nThe IMAP server is serving this local fixture message.\r\n"),
-		}),
+		ConnectorFactory:  connectorFactory(options, session),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("start IMAP: %w", err)
 	}
 	return service, nil
+}
+
+// connectorFactory serves the account's own mail, falling back to a fixture
+// mailbox when the Mail API is not reachable.
+func connectorFactory(options Options, session control.Session) imapserver.ConnectorFactory {
+	log := logger.New("mail")
+
+	service, err := mailService(options, session, log)
+	if err != nil {
+		log.Warn("serving fixture mail: %v", err)
+		return imapserver.NewDevelopmentConnectorFactory([][]byte{
+			[]byte("From: welcome@example.test\r\nTo: user@example.test\r\nSubject: Mail Bridge development server\r\n\r\nThe IMAP server is serving this local fixture message.\r\n"),
+		})
+	}
+
+	return imapserver.NewMailConnectorFactory(service, logger.New("imap"))
+}
+
+// mailService builds the service that reads the account's mail, from the
+// session the parent sent.
+//
+// Nothing here is read from disk: the token and the keys live as long as the
+// session does, which is what makes signing out a matter of closing it.
+func mailService(options Options, session control.Session, log *logger.Logger) (imapserver.MailService, error) {
+	backend, err := session.Backend()
+	if err != nil {
+		return nil, err
+	}
+	if backend.Token == "" {
+		return nil, errors.New("the session carries no Mail API token")
+	}
+
+	client, err := api.New(options.Config, log)
+	if err != nil {
+		return nil, err
+	}
+
+	return mail.New(client, mail.Account{
+		Token:   backend.Token,
+		Address: session.Addresses[0],
+	}, log), nil
 }
 
 // storagePassphrase reads the key encrypting Gluon's message cache, generating

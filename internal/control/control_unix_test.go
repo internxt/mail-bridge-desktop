@@ -6,26 +6,44 @@ import (
 	"context"
 	"encoding/json"
 	"net"
+	"os"
 	"path/filepath"
 	"testing"
 )
 
+// socketPath returns a short path for a Unix socket.
+//
+// t.TempDir() is not usable here: on macOS it sits under /var/folders/... and
+// the resulting path exceeds the ~104 byte limit the kernel imposes on socket
+// addresses, which surfaces as a puzzling "bind: invalid argument".
+func socketPath(t *testing.T) string {
+	t.Helper()
+
+	dir, err := os.MkdirTemp("", "ctl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+
+	return filepath.Join(dir, "c.sock")
+}
+
 func TestConnectReceivesStartSessionAndSendsReady(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "control.sock")
+	path := socketPath(t)
 	listener, err := net.Listen("unix", path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = listener.Close() })
 
-	ready := make(chan message, 1)
+	ready := make(chan Message, 1)
 	go func() {
 		connection, err := listener.Accept()
 		if err != nil {
 			return
 		}
 		defer connection.Close()
-		if err := writeMessage(context.Background(), connection, message{
+		if err := WriteMessage(context.Background(), connection, Message{
 			Type: startSessionType,
 			Session: &Session{
 				AccountID:      "account-1",
@@ -36,7 +54,7 @@ func TestConnectReceivesStartSessionAndSendsReady(t *testing.T) {
 		}); err != nil {
 			return
 		}
-		response, err := readMessage(context.Background(), connection)
+		response, err := ReadMessage(context.Background(), connection)
 		if err == nil {
 			ready <- response
 		}
