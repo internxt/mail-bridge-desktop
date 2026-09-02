@@ -24,6 +24,18 @@ type MailClient struct {
 	Password string `json:"password"`
 }
 
+// BackendSession is what the bridge needs in order to act for the account:
+// the Mail API token, and the keys that open encrypted mail.
+//
+// It travels inside Session.BackendSession as opaque JSON, so this shape is
+// agreed between the parent and the backend adapter rather than by the framing
+// in this package. Nothing here is persisted: it lives as long as the session.
+type BackendSession struct {
+	Token                string `json:"token"`
+	EncryptionPrivateKey string `json:"encryption_private_key,omitempty"`
+	PublicKey            string `json:"public_key,omitempty"`
+}
+
 // Ready reports the actual local listener addresses after the bridge binds
 // both services.
 type Ready struct {
