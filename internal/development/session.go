@@ -18,15 +18,6 @@ const (
 	passwordFile = "dev-mail-password"
 )
 
-// BackendSession carries what the bridge needs to talk to the Mail API. It
-// travels as opaque JSON, so its shape is agreed between the parent and the
-// backend adapter rather than by internal/control.
-type BackendSession struct {
-	Token                string `json:"token"`
-	EncryptionPrivateKey string `json:"encryption_private_key,omitempty"`
-	PublicKey            string `json:"public_key,omitempty"`
-}
-
 // SessionFromEnv builds the session the real parent would send, from the .env.
 //
 // The password is generated here and kept in stateDir, because the parent owns
@@ -38,7 +29,7 @@ func SessionFromEnv(stateDir string) (control.Session, error) {
 		return control.Session{}, errors.New("BRIDGE_DEV_EMAIL is not set")
 	}
 
-	backend, err := json.Marshal(BackendSession{
+	backend, err := json.Marshal(control.BackendSession{
 		Token:                os.Getenv("BRIDGE_DEV_TOKEN"),
 		EncryptionPrivateKey: os.Getenv("BRIDGE_DEV_ENCRYPTION_PRIVATE_KEY"),
 		PublicKey:            os.Getenv("BRIDGE_DEV_PUBLIC_KEY"),

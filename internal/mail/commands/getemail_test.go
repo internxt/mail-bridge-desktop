@@ -1,0 +1,78 @@
+package commands
+
+import (
+	"context"
+	"errors"
+	"testing"
+
+	"mail-bridge-desktop/internal/api"
+)
+
+type fakeClient struct {
+	thread []api.EmailResponseDto
+	err    error
+}
+
+func (f *fakeClient) GetUserFolder(ctx context.Context, token string, opts api.ListEmailsOptions) (api.EmailListResponseDto, error) {
+	return api.EmailListResponseDto{}, f.err
+}
+
+func (f *fakeClient) GetMailboxes(ctx context.Context, token string) ([]api.MailboxResponseDto, error) {
+	return nil, f.err
+}
+
+func (f *fakeClient) GetThread(ctx context.Context, token, emailID string) ([]api.EmailResponseDto, error) {
+	return f.thread, f.err
+}
+
+func TestGetEmailPicksItOutOfTheThread(t *testing.T) {
+	client := &fakeClient{thread: []api.EmailResponseDto{
+		{Id: "M1", Subject: "primero"},
+		{Id: "M2", Subject: "segundo"},
+	}}
+
+	email, err := GetEmail(context.Background(), client, "tok", "M2", Account{})
+	if err != nil {
+		t.Fatalf("GetEmail: %v", err)
+	}
+	if email.Subject != "segundo" {
+		t.Fatalf("got %q, want segundo", email.Subject)
+	}
+}
+
+// A message in two folders has one ID per copy, and the thread comes back
+// carrying only one of them.
+func TestGetEmailAcceptsSingleMessageThreadWithAnotherID(t *testing.T) {
+	client := &fakeClient{thread: []api.EmailResponseDto{
+		{Id: "jyaaaacp", Subject: "la otra copia"},
+	}}
+
+	email, err := GetEmail(context.Background(), client, "tok", "jyaaaaco", Account{})
+	if err != nil {
+		t.Fatalf("GetEmail: %v", err)
+	}
+	if email.Subject != "la otra copia" {
+		t.Fatalf("got %q", email.Subject)
+	}
+}
+
+// With several messages and no ID match there is no way to tell which one was
+// meant, so it is an error rather than a guess.
+func TestGetEmailNotFoundInThread(t *testing.T) {
+	client := &fakeClient{thread: []api.EmailResponseDto{
+		{Id: "M1"},
+		{Id: "M2"},
+	}}
+
+	if _, err := GetEmail(context.Background(), client, "tok", "M9", Account{}); !errors.Is(err, ErrEmailNotFound) {
+		t.Fatalf("errors.Is(err, ErrEmailNotFound) = false, err = %v", err)
+	}
+}
+
+func TestGetEmailPropagatesClientError(t *testing.T) {
+	client := &fakeClient{err: errors.New("boom")}
+
+	if _, err := GetEmail(context.Background(), client, "tok", "M1", Account{}); err == nil {
+		t.Fatal("expected an error")
+	}
+}

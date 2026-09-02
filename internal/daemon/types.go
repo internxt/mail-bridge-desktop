@@ -2,9 +2,11 @@ package daemon
 
 import "mail-bridge-desktop/internal/config"
 
-// Options configures one development bridge daemon instance.
-// TODO(auth): replace the development mailbox options with the authenticated,
-// unlocked account session and the production backend connector.
+// Options configures one bridge daemon instance.
+//
+// The account is not here: it arrives from the parent over the control
+// channel, so everything specific to a user comes from the session rather than
+// from how the process was started.
 type Options struct {
 	Config          config.Config
 	IMAPAddress     string
