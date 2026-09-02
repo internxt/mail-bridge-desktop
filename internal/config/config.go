@@ -15,8 +15,6 @@ func env(key, def string) string {
 }
 
 func Load() Config {
-	// A missing .env file is normal in deployed environments, where values are
-	// supplied by the service manager or process environment instead.
 	_ = godotenv.Load()
 
 	host := env("BRIDGE_HOST", "127.0.0.1")
