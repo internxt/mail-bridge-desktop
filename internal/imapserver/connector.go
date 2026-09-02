@@ -30,11 +30,6 @@ func withAuthorization(conn connector.Connector, credentials Credentials) connec
 }
 
 // Authorize reports whether a mail client may open this mailbox.
-//
-// The username is matched case-insensitively because mail clients do not
-// preserve the case a user typed, and an address is the same address either
-// way. The password is compared in constant time so a failed attempt reveals
-// nothing about how much of it was right.
 func (c *authConnector) Authorize(_ context.Context, username string, password []byte) bool {
 	sameUser := strings.EqualFold(username, c.username)
 	samePassword := subtle.ConstantTimeCompare(password, c.password) == 1

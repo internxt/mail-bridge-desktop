@@ -37,10 +37,6 @@ func (keychain) Remove(key string) error {
 
 // memoryKeychain is an in-memory stand-in used by tests, so they never touch
 // the real keychain (which does not exist on CI machines).
-//
-// The real keychain is safe to use from several goroutines, so this one locks
-// too: without it a test exercising concurrent access would fail under -race
-// for a reason that has nothing to do with what it is testing.
 type memoryKeychain struct {
 	mu     sync.Mutex
 	values map[string][]byte
