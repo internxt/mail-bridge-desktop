@@ -43,4 +43,3 @@ application must first authenticate and unlock the account's encryption keys,
 then pass an `UnlockedSession` to `imapserver.Start`. A future production
 Gluon connector will fetch encrypted data from the backend, decrypt it locally
 into MIME messages, and apply local IMAP changes back to the backend API.
-
