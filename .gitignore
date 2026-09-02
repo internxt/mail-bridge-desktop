@@ -1,3 +1,8 @@
+# .gitignore from Node.gitignore template: https://github.com/github/gitignore/blob/main/Node.gitignore
+
+# VSCode
+.vscode
+
 # Logs
 logs
 *.log
