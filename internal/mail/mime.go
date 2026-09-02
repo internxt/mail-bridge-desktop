@@ -18,11 +18,6 @@ import (
 const messageIDDomain = "mail-bridge.internxt.local"
 
 // BuildLiteral turns an email into the RFC 5322 message an IMAP client expects.
-//
-// The API returns an email as separate fields, not as a message, so the literal
-// has to be assembled here. Clients cache messages by UID, so the same email
-// must always produce the same bytes: nothing in here may depend on the current
-// time or on random values.
 func BuildLiteral(email api.EmailResponseDto) ([]byte, error) {
 	var buf bytes.Buffer
 
@@ -55,7 +50,6 @@ func writeHeaders(buf *bytes.Buffer, email api.EmailResponseDto) error {
 	return nil
 }
 
-// writeHeader skips empty values, since an empty header is worse than none.
 func writeHeader(buf *bytes.Buffer, name, value string) {
 	if value == "" {
 		return
@@ -73,8 +67,6 @@ func writeBody(buf *bytes.Buffer, email api.EmailResponseDto) error {
 	case html != "":
 		return writeSinglePart(buf, "text/html", html)
 	default:
-		// An email with neither body still has to be a valid message, so an
-		// empty text part stands in for it.
 		return writeSinglePart(buf, "text/plain", text)
 	}
 }
@@ -146,8 +138,6 @@ func boundary(parts ...string) string {
 	return fmt.Sprintf("%016x", sum)
 }
 
-// parseDate prefers the moment the email was sent, falling back to when it was
-// received.
 func parseDate(email api.EmailResponseDto) (time.Time, error) {
 	raw := deref(email.SentAt)
 	if raw == "" {
@@ -164,8 +154,6 @@ func parseDate(email api.EmailResponseDto) (time.Time, error) {
 	return date, nil
 }
 
-// formatAddresses renders an address list, encoding display names that carry
-// non-ASCII characters.
 func formatAddresses(addresses []api.EmailAddressDto) string {
 	formatted := make([]string, 0, len(addresses))
 	for _, address := range addresses {

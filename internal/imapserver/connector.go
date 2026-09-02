@@ -89,14 +89,6 @@ func (c *mailConnector) Sync(ctx context.Context) error {
 	return nil
 }
 
-func (c *mailConnector) messageLiteral(ctx context.Context, summary api.EmailSummaryResponseDto) []byte {
-	literal, err := c.service.GetMessageLiteral(ctx, summary.Id)
-	if err != nil {
-		c.log.Warn("serving message %s without its body: %v", summary.Id, err)
-	}
-	return literal
-}
-
 // syncMailbox announces one folder and the messages it holds.
 func (c *mailConnector) syncMailbox(ctx context.Context, mailbox api.MailboxResponseDto) error {
 	c.updates <- imap.NewMailboxCreated(toIMAPMailbox(mailbox))
@@ -110,7 +102,12 @@ func (c *mailConnector) syncMailbox(ctx context.Context, mailbox api.MailboxResp
 
 	messages := make([]*imap.MessageCreated, 0, len(summaries))
 	for _, summary := range summaries {
-		message, err := toIMAPMessage(mailbox, summary, c.messageLiteral(ctx, summary))
+		literal, err := c.service.GetMessageLiteral(ctx, summary.Id)
+		if err != nil {
+			c.log.Warn("serving message %s without its body: %v", summary.Id, err)
+		}
+
+		message, err := toIMAPMessage(mailbox, summary, literal)
 		if err != nil {
 			c.log.Warn("skipping message %s: %v", summary.Id, err)
 			continue

@@ -8,11 +8,6 @@ import (
 	"mail-bridge-desktop/internal/crypto"
 )
 
-// Account is the identity a mailbox is read as: the address emails were
-// encrypted for, and the private key that opens them.
-//
-// A zero Account disables decryption, which is what lets the bridge run against
-// a plaintext account, or before the desktop client has sent the keys over IPC.
 type Account struct {
 	Address    string
 	PrivateKey []byte

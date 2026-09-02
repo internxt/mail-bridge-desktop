@@ -14,19 +14,6 @@ var ErrEmailNotFound = errors.New("email not found")
 
 // GetEmail returns one email in full, with its body decrypted when it is
 // encrypted and the account holds the keys.
-//
-// The API has no endpoint for a single email: the thread endpoint takes any
-// email ID and returns every message in its thread, so this asks for the email
-// itself and picks it out of the result.
-//
-// The ID that comes back is not always the one that was asked for. A message
-// that lives in more than one folder has a distinct ID per copy, and the thread
-// returns only one of them, so a single-message thread is taken to be the
-// message that was requested.
-//
-// An email whose body cannot be decrypted is still returned, carrying its
-// envelope; the error explains why. Callers that only want the message can
-// ignore it.
 func GetEmail(ctx context.Context, client Client, token, emailID string, account Account) (api.EmailResponseDto, error) {
 	thread, err := client.GetThread(ctx, token, emailID)
 	if err != nil {
