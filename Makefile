@@ -2,7 +2,7 @@
 #
 # Run `make` with no target for the list.
 
-BINARY     := bridge
+BINARY     := mail-bridge
 BUILD_DIR  := bin
 CMD        := ./cmd/bridge
 

@@ -43,3 +43,36 @@ application must first authenticate and unlock the account's encryption keys,
 then pass an `UnlockedSession` to `imapserver.Start`. A future production
 Gluon connector will fetch encrypted data from the backend, decrypt it locally
 into MIME messages, and apply local IMAP changes back to the backend API.
+
+## Using it on the desktop apps
+
+The mail bridge is consumed by the Internxt desktop apps on [Windows](https://github.com/internxt/drive-desktop), [Linux](https://github.com/internxt/drive-desktop-linux), and [macOS](https://github.com/internxt/drive-desktop-macos). It shouldnt be be compiled by those apps.
+A mail-bridge release produces immutable binaries so each desktop app fetches one pinned binary at packaging time and includes it in its own application bundle.
+
+## Release artifact contract
+
+Every bridge Git tag in the form `vMAJOR.MINOR.PATCH` publishes a GitHub
+Release (or an equivalent immutable artifact store) with the following assets.
+`VERSION` below is the tag without its leading `v`.
+
+| Target | Archive | Executable inside archive |
+| --- | --- | --- |
+| Windows x64 | `mail-bridge_VERSION_windows_amd64.zip` | `mail-bridge.exe` |
+| Linux x64 | `mail-bridge_VERSION_linux_amd64.tar.gz` | `mail-bridge` |
+| macOS Apple Silicon | `mail-bridge_VERSION_darwin_arm64.tar.gz` | `mail-bridge` |
+
+Each archive contains exactly one executable at the archive root. It must not
+contain a directory named after the version or target. This makes the path
+inside an Electron resource bundle stable.
+
+The release also contains:
+
+- `manifest.json`, conforming to
+  [`release/manifest.schema.json`](release/manifest.schema.json).
+- `checksums.txt`, with one line per release asset in standard SHA-256 format:
+  `<lowercase-hex-sha256>  <filename>`.
+
+The manifest is the consumption contract. Consumers select an entry by `os`
+and `arch`, download `url`, verify `sha256` against the downloaded archive,
+and extract the named `executable`. They must pin an exact `version` so they
+must never request a moving `latest` release.

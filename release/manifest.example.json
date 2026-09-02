@@ -1,0 +1,29 @@
+{
+  "version": "1.0.0",
+  "artifacts": [
+    {
+      "os": "windows",
+      "arch": "amd64",
+      "archive": "zip",
+      "url": "https://github.com/internxt/mail-bridge-desktop/releases/download/v1.0.0/mail-bridge_1.0.0_windows_amd64.zip",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "executable": "mail-bridge.exe"
+    },
+    {
+      "os": "linux",
+      "arch": "amd64",
+      "archive": "tar.gz",
+      "url": "https://github.com/internxt/mail-bridge-desktop/releases/download/v1.0.0/mail-bridge_1.0.0_linux_amd64.tar.gz",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "executable": "mail-bridge"
+    },
+    {
+      "os": "darwin",
+      "arch": "arm64",
+      "archive": "tar.gz",
+      "url": "https://github.com/internxt/mail-bridge-desktop/releases/download/v1.0.0/mail-bridge_1.0.0_darwin_arm64.tar.gz",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "executable": "mail-bridge"
+    }
+  ]
+}
