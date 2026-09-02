@@ -2,7 +2,7 @@
 #
 # Run `make` with no target for the list.
 
-BINARY     := bridge
+BINARY     := mail-bridge
 BUILD_DIR  := bin
 CMD        := ./cmd/bridge
 
@@ -81,4 +81,4 @@ types:
 clean:
 	rm -rf $(BUILD_DIR)
 
-.PHONY: help run dev-control build test check fmt vet tidy spec types clean store-list store-clear
+.PHONY: help run build test check fmt vet tidy spec types clean
