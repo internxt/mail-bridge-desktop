@@ -90,9 +90,6 @@ func startIMAP(ctx context.Context, options Options, session control.Session) (*
 
 // connectorFactory serves the account's own mail, falling back to a fixture
 // mailbox when the Mail API is not reachable.
-//
-// The fallback keeps the bridge worth starting without a backend: the control
-// channel and a mail client's connection can still be checked.
 func connectorFactory(options Options, session control.Session) imapserver.ConnectorFactory {
 	log := logger.New("mail")
 

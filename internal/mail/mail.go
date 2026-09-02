@@ -20,14 +20,8 @@ import (
 // the control channel and is held in memory only: nothing here is persisted,
 // so signing out is a matter of dropping the service.
 type Account struct {
-	// Token authenticates every Mail API call.
-	Token string
-
-	// Address is the mailbox being served.
-	Address string
-
-	// PrivateKey is the account's mail key, already decrypted: the 32-byte
-	// root seed. Empty until bodies are decrypted, which is a later step.
+	Token      string
+	Address    string
 	PrivateKey []byte
 }
 
