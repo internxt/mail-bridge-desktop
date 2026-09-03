@@ -1,4 +1,4 @@
-package imapserver
+package mailconnector
 
 import (
 	"context"
@@ -88,8 +88,8 @@ func (f *fakeMailService) Delete(ctx context.Context, emailIDs []string) error {
 	return f.writeErr
 }
 
-func testConnector(service MailService) *mailConnector {
-	return &mailConnector{
+func testConnector(service MailService) *MailConnector {
+	return &MailConnector{
 		service:      service,
 		log:          logger.New("test"),
 		updates:      make(chan imap.Update, updateBufferSize),

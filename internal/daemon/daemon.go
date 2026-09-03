@@ -1,3 +1,7 @@
+// Package daemon orchestrates the bridge process for one unlocked session: it
+// starts the local IMAP and SMTP services, reports readiness to the parent
+// application over the control channel, and shuts both services down when
+// the session ends.
 package daemon
 
 import (
@@ -7,9 +11,12 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ProtonMail/gluon/connector"
+
 	"mail-bridge-desktop/internal/api"
 	"mail-bridge-desktop/internal/control"
 	"mail-bridge-desktop/internal/imapserver"
+	"mail-bridge-desktop/internal/imapserver/mailconnector"
 	"mail-bridge-desktop/internal/logger"
 	"mail-bridge-desktop/internal/mail"
 	"mail-bridge-desktop/internal/smtpserver"
@@ -83,7 +90,7 @@ func startIMAP(ctx context.Context, options Options, session control.Session) (*
 		StoragePassphrase: passphrase,
 		ConnectorFactory:  connectorFactory(options, session),
 		LogProtocol:       options.Config.LogImapProtocol,
-		PollInterval:      imapserver.DefaultPollInterval,
+		PollInterval:      mailconnector.DefaultPollInterval,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("start IMAP: %w", err)
@@ -104,7 +111,10 @@ func connectorFactory(options Options, session control.Session) imapserver.Conne
 		})
 	}
 
-	return imapserver.NewMailConnectorFactory(service, logger.New("imap"))
+	imapLog := logger.New("imap")
+	return func(ctx context.Context, _ imapserver.UnlockedSession, _ imapserver.Credentials) (connector.Connector, error) {
+		return mailconnector.New(service, imapLog), nil
+	}
 }
 
 // mailService builds the service that reads the account's mail, from the
@@ -112,7 +122,7 @@ func connectorFactory(options Options, session control.Session) imapserver.Conne
 //
 // Nothing here is read from disk: the token and the keys live as long as the
 // session does, which is what makes signing out a matter of closing it.
-func mailService(options Options, session control.Session, log *logger.Logger) (imapserver.MailService, error) {
+func mailService(options Options, session control.Session, log *logger.Logger) (mailconnector.MailService, error) {
 	backend, err := session.Backend()
 	if err != nil {
 		return nil, err

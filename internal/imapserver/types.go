@@ -9,6 +9,8 @@ import (
 
 	"github.com/ProtonMail/gluon"
 	"github.com/ProtonMail/gluon/connector"
+
+	"mail-bridge-desktop/internal/imapserver/mailconnector"
 )
 
 // UnlockedSession identifies an account whose authentication and encryption
@@ -63,7 +65,7 @@ type IMAPServer struct {
 	server      *gluon.Server
 	listener    net.Listener
 	stopServing context.CancelFunc
-	poller      *poller
+	poller      *mailconnector.Poller
 
 	status      Status
 	credentials []byte

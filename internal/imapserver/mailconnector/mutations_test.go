@@ -1,4 +1,4 @@
-package imapserver
+package mailconnector
 
 import (
 	"context"
@@ -18,7 +18,7 @@ const (
 	trashID = imap.MailboxID("b")
 )
 
-func connectorWithMailboxes(service MailService) *mailConnector {
+func connectorWithMailboxes(service MailService) *MailConnector {
 	c := testConnector(service)
 	c.rememberMailboxType(api.MailboxResponseDto{Id: string(inboxID), Type: mailboxTypePtr(api.MailboxInbox)})
 	c.rememberMailboxType(api.MailboxResponseDto{Id: string(trashID), Type: mailboxTypePtr(api.MailboxTrash)})
