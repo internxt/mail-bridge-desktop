@@ -9,6 +9,8 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/zalando/go-keyring v0.2.8
 	golang.org/x/crypto v0.55.0
+	golang.org/x/sync v0.22.0
+	golang.org/x/sys v0.47.0
 )
 
 require (
@@ -21,7 +23,5 @@ require (
 	github.com/pierrec/lz4/v4 v4.1.17 // indirect
 	github.com/sirupsen/logrus v1.9.0 // indirect
 	golang.org/x/exp v0.0.0-20230213192124-5e25df0256eb // indirect
-	golang.org/x/sync v0.22.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.41.0 // indirect
 )
