@@ -3,6 +3,8 @@ package imapserver
 import (
 	"context"
 	"errors"
+	"slices"
+	"sync"
 	"testing"
 
 	"github.com/ProtonMail/gluon/imap"
@@ -25,18 +27,41 @@ type fakeMailService struct {
 	moved         []string
 	movedTo       api.Mailbox
 	deleted       []string
+
+	// What the account holds, for the sync to read.
+	mailboxes []api.MailboxResponseDto
+	summaries map[api.Mailbox][]api.EmailSummaryResponseDto
+	listErr   map[api.Mailbox]error
+
+	// bodyFetchs records which messages had their body downloaded, which is
+	// what tells a new message apart from one that merely changed. Guarded
+	// because bodies are fetched in parallel.
+	bodyMutex  sync.Mutex
+	bodyFetchs []string
 }
 
 func (f *fakeMailService) ListMailboxes(ctx context.Context) ([]api.MailboxResponseDto, error) {
-	return nil, nil
+	return f.mailboxes, f.err
 }
 
 func (f *fakeMailService) ListAllEmails(ctx context.Context, opts api.ListEmailsOptions) ([]api.EmailSummaryResponseDto, error) {
-	return nil, nil
+	if err, failing := f.listErr[opts.Mailbox]; failing {
+		return nil, err
+	}
+	return f.summaries[opts.Mailbox], nil
 }
 
 func (f *fakeMailService) GetMessageLiteral(ctx context.Context, emailID string) ([]byte, error) {
+	f.bodyMutex.Lock()
+	f.bodyFetchs = append(f.bodyFetchs, emailID)
+	f.bodyMutex.Unlock()
 	return f.literal, f.err
+}
+
+func (f *fakeMailService) fetchedBodies() []string {
+	f.bodyMutex.Lock()
+	defer f.bodyMutex.Unlock()
+	return slices.Clone(f.bodyFetchs)
 }
 
 func (f *fakeMailService) ForgetThreads() { f.forgotten++ }

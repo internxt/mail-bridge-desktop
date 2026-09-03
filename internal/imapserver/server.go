@@ -32,7 +32,8 @@ func Start(ctx context.Context, session UnlockedSession, config Config) (*IMAPSe
 	}
 	defer closeOnFailure(gluonServer, &err)
 
-	if err = connectMailbox(ctx, gluonServer, session, config); err != nil {
+	syncer, err := connectMailbox(ctx, gluonServer, session, config)
+	if err != nil {
 		return nil, err
 	}
 
@@ -47,10 +48,19 @@ func Start(ctx context.Context, session UnlockedSession, config Config) (*IMAPSe
 		return nil, err
 	}
 
+	// Polling starts only once the server is up, and only for a connector that
+	// can synchronise. An interval of zero leaves the mailbox as the first sync
+	// left it, which is what tests want.
+	var pollers *poller
+	if syncer != nil && config.PollInterval > 0 {
+		pollers = startPolling(ctx, syncer, config.PollInterval, logger.New("imap"))
+	}
+
 	return &IMAPServer{
 		server:      gluonServer,
 		listener:    listener,
 		stopServing: stopServing,
+		poller:      pollers,
 		credentials: []byte(config.LocalCredentials.Password),
 		started:     true,
 		status: Status{
@@ -124,31 +134,33 @@ func createGluonServer(config Config) (*gluon.Server, error) {
 	return gluonServer, nil
 }
 
-func connectMailbox(ctx context.Context, gluonServer *gluon.Server, session UnlockedSession, config Config) error {
+func connectMailbox(ctx context.Context, gluonServer *gluon.Server, session UnlockedSession, config Config) (synchronizer, error) {
 	conn, err := config.ConnectorFactory(ctx, session, config.LocalCredentials)
 	if err != nil {
-		return fmt.Errorf("create mailbox connector: %w", err)
+		return nil, fmt.Errorf("create mailbox connector: %w", err)
 	}
 
 	// Whether the connector can synchronise is asked of the original, not of
 	// the wrapper below: authConnector embeds the Connector interface, which
 	// does not declare Sync, so the method is not promoted and a type
 	// assertion on the wrapper would quietly find nothing.
-	synchronizer, canSync := conn.(interface{ Sync(context.Context) error })
+	syncer, canSync := conn.(synchronizer)
 
 	// Authorisation is enforced here rather than left to each connector, so
 	// every mailbox is reached through the same check.
 	conn = withAuthorization(conn, config.LocalCredentials)
 
 	if _, err := gluonServer.AddUser(ctx, conn, config.StoragePassphrase); err != nil {
-		return fmt.Errorf("add IMAP user: %w", err)
+		return nil, fmt.Errorf("add IMAP user: %w", err)
 	}
-	if canSync {
-		if err := synchronizer.Sync(ctx); err != nil {
-			return fmt.Errorf("perform initial mailbox sync: %w", err)
-		}
+	if !canSync {
+		return nil, nil
 	}
-	return nil
+
+	if err := syncer.Sync(ctx); err != nil {
+		return nil, fmt.Errorf("perform initial mailbox sync: %w", err)
+	}
+	return syncer, nil
 }
 
 func startServing(ctx context.Context, gluonServer *gluon.Server, address string) (net.Listener, error) {
@@ -199,13 +211,17 @@ func (s *IMAPServer) Close(ctx context.Context) error {
 	listener := s.listener
 	gluonServer := s.server
 	stopServing := s.stopServing
+	pollers := s.poller
 	s.listener = nil
 	s.server = nil
 	s.stopServing = nil
+	s.poller = nil
 	clear(s.credentials)
 	s.credentials = nil
 	s.status.Credentials.Password = ""
 	s.mutex.Unlock()
+
+	pollers.stopPolling()
 
 	var result error
 	if listener != nil {

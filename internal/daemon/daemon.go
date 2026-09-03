@@ -83,6 +83,7 @@ func startIMAP(ctx context.Context, options Options, session control.Session) (*
 		StoragePassphrase: passphrase,
 		ConnectorFactory:  connectorFactory(options, session),
 		LogProtocol:       options.Config.LogImapProtocol,
+		PollInterval:      imapserver.DefaultPollInterval,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("start IMAP: %w", err)

@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/ProtonMail/gluon"
 	"github.com/ProtonMail/gluon/connector"
@@ -52,18 +53,17 @@ type Config struct {
 	StoragePassphrase []byte
 	ConnectorFactory  ConnectorFactory
 	LogProtocol       bool
+	PollInterval      time.Duration
 }
 
 // IMAPServer owns a running IMAP service, its listener, and its local client
 // credentials.
 type IMAPServer struct {
-	mutex    sync.Mutex
-	server   *gluon.Server
-	listener net.Listener
-
-	// stopServing ends the context Gluon serves under. It is deliberately not
-	// the caller's context: see the note in Start.
+	mutex       sync.Mutex
+	server      *gluon.Server
+	listener    net.Listener
 	stopServing context.CancelFunc
+	poller      *poller
 
 	status      Status
 	credentials []byte

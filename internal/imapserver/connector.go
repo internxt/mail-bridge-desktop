@@ -7,6 +7,7 @@ import (
 
 	"github.com/ProtonMail/gluon/connector"
 	"github.com/ProtonMail/gluon/imap"
+	"golang.org/x/sync/errgroup"
 
 	"mail-bridge-desktop/internal/api"
 	"mail-bridge-desktop/internal/logger"
@@ -32,6 +33,8 @@ type mailConnector struct {
 	closeOnce         sync.Once
 	mailboxTypesMutex sync.RWMutex
 	mailboxTypes      map[imap.MailboxID]api.Mailbox
+	messagesMutex     sync.RWMutex
+	messages          map[string]messageState
 }
 
 // NewMailConnectorFactory serves the account's own mail, rather than a fixture.
@@ -42,11 +45,17 @@ func NewMailConnectorFactory(service MailService, log *logger.Logger) ConnectorF
 			log:          log,
 			updates:      make(chan imap.Update, updateBufferSize),
 			mailboxTypes: make(map[imap.MailboxID]api.Mailbox),
+			messages:     make(map[string]messageState),
 		}, nil
 	}
 }
 
 const updateBufferSize = 32
+
+const (
+	listEmailsLimit      = 100
+	fetchBodyConcurrency = 8
+)
 
 // Authorize is replaced by authConnector, which the server wraps every
 // connector in. It is here only to satisfy the interface.
@@ -78,7 +87,8 @@ func (c *mailConnector) Close(ctx context.Context) error {
 	return nil
 }
 
-// Sync loads the account's folders and their messages.
+// Sync brings Gluon in line with the account: it announces what is new, what
+// changed elsewhere, and what is gone.
 func (c *mailConnector) Sync(ctx context.Context) error {
 	// What the service remembers is only worth holding for the length of a
 	// sync: it is what keeps a conversation in several folders from being
@@ -90,40 +100,80 @@ func (c *mailConnector) Sync(ctx context.Context) error {
 		return fmt.Errorf("list mailboxes: %w", err)
 	}
 
+	seen := make(map[string]messageState)
+	complete := true
+
 	for _, mailbox := range mailboxes {
-		if err := c.syncMailbox(ctx, mailbox); err != nil {
+		if err := c.syncMailbox(ctx, mailbox, seen); err != nil {
 			c.log.Warn("skipping mailbox %s: %v", mailbox.Name, err)
+			complete = false
 			continue
 		}
+	}
+
+	c.rememberMessages(seen)
+
+	// Deletions are only safe when every folder answered. After a partial run
+	// the messages of the folder that failed are missing from seen, and taking
+	// that at face value would delete mail that is still there.
+	if complete {
+		c.forgetDeleted(seen)
 	}
 
 	return nil
 }
 
-// syncMailbox announces one folder and the messages it holds.
-func (c *mailConnector) syncMailbox(ctx context.Context, mailbox api.MailboxResponseDto) error {
-	c.rememberMailboxType(mailbox)
-	c.updates <- imap.NewMailboxCreated(toIMAPMailbox(mailbox))
+// forgetDeleted tells Gluon about messages that are no longer in the account.
+func (c *mailConnector) forgetDeleted(seen map[string]messageState) {
+	missing := c.missingMessages(seen)
+	for _, id := range missing {
+		c.updates <- imap.NewMessagesDeleted(imap.MessageID(id))
+	}
+	c.forgetMessages(missing)
 
-	summaries, err := c.service.ListAllEmails(ctx, api.ListEmailsOptions{
-		Mailbox: mailboxType(mailbox),
-	})
-	if err != nil {
-		return fmt.Errorf("list emails: %w", err)
+	if len(missing) > 0 {
+		c.log.Info("removed %d messages that are gone", len(missing))
+	}
+}
+
+// announceNewMessages announces messages Gluon has never seen, fetching their bodies.
+func (c *mailConnector) announceNewMessages(ctx context.Context, mailbox api.MailboxResponseDto, summaries []api.EmailSummaryResponseDto) error {
+	if len(summaries) == 0 {
+		return nil
+	}
+
+	literals := make([][]byte, len(summaries))
+
+	group, groupCtx := errgroup.WithContext(ctx)
+	group.SetLimit(fetchBodyConcurrency)
+
+	for i, summary := range summaries {
+		group.Go(func() error {
+			literal, err := c.service.GetMessageLiteral(groupCtx, summary.Id)
+
+			if err != nil {
+				c.log.Warn("serving message %s without its body: %v", summary.Id, err)
+			}
+
+			literals[i] = literal
+			return nil
+		})
+	}
+
+	if err := group.Wait(); err != nil {
+		return fmt.Errorf("fetch message bodies: %w", err)
 	}
 
 	messages := make([]*imap.MessageCreated, 0, len(summaries))
-	for _, summary := range summaries {
-		literal, err := c.service.GetMessageLiteral(ctx, summary.Id)
-		if err != nil {
-			c.log.Warn("serving message %s without its body: %v", summary.Id, err)
-		}
 
-		message, err := toIMAPMessage(mailbox, summary, literal)
+	for i, summary := range summaries {
+		message, err := toIMAPMessage(mailbox, summary, literals[i])
+
 		if err != nil {
 			c.log.Warn("skipping message %s: %v", summary.Id, err)
 			continue
 		}
+
 		messages = append(messages, &message)
 	}
 
@@ -131,6 +181,50 @@ func (c *mailConnector) syncMailbox(ctx context.Context, mailbox api.MailboxResp
 		c.updates <- imap.NewMessagesCreated(true, messages...)
 	}
 
-	c.log.Info("synced %s: %d messages", mailbox.Name, len(messages))
+	return nil
+}
+
+// syncMailbox announces one folder and reconciles the messages it holds.
+func (c *mailConnector) syncMailbox(ctx context.Context, mailbox api.MailboxResponseDto, seen map[string]messageState) error {
+	// A folder is announced once. Gluon ignores a repeat, but a sync on a timer
+	// would otherwise send one per folder per cycle for nothing.
+	if !c.knownMailbox(imap.MailboxID(mailbox.Id)) {
+		c.updates <- imap.NewMailboxCreated(toIMAPMailbox(mailbox))
+	}
+	c.rememberMailboxType(mailbox)
+
+	summaries, err := c.service.ListAllEmails(ctx, api.ListEmailsOptions{
+		Mailbox: mailboxType(mailbox),
+		Limit:   listEmailsLimit,
+	})
+	if err != nil {
+		return fmt.Errorf("list emails: %w", err)
+	}
+
+	var created []api.EmailSummaryResponseDto
+
+	for _, summary := range summaries {
+		state := stateOf(summary)
+		seen[summary.Id] = state
+
+		known, found := c.knownMessage(summary.Id)
+
+		switch {
+		case !found:
+			created = append(created, summary)
+		case !known.sameAs(state):
+			c.updates <- imap.NewMessageMailboxesUpdated(
+				imap.MessageID(summary.Id),
+				state.imapMailboxIDs(),
+				state.flags(),
+			)
+		}
+	}
+
+	if err := c.announceNewMessages(ctx, mailbox, created); err != nil {
+		return err
+	}
+
+	c.log.Info("synced %s: %d messages, %d new", mailbox.Name, len(summaries), len(created))
 	return nil
 }
