@@ -15,11 +15,14 @@ import (
 type MailService interface {
 	ListMailboxes(ctx context.Context) ([]api.MailboxResponseDto, error)
 	ListAllEmails(ctx context.Context, opts api.ListEmailsOptions) ([]api.EmailSummaryResponseDto, error)
+	GetMessageLiteral(ctx context.Context, emailID string) ([]byte, error)
+	ForgetThreads()
 }
 
 type mailConnector struct {
 	service MailService
 	log     *logger.Logger
+
 	updates chan imap.Update
 	// Closes the Gluon instance when the connector is closed.
 	closeOnce sync.Once
@@ -53,7 +56,14 @@ func (c *mailConnector) GetUpdates() <-chan imap.Update { return c.updates }
 // GetMessageLiteral is called when Gluon needs a message body it does not have
 // cached.
 func (c *mailConnector) GetMessageLiteral(ctx context.Context, id imap.MessageID) ([]byte, error) {
-	return nil, fmt.Errorf("message bodies are not available yet: %s", id)
+	literal, err := c.service.GetMessageLiteral(ctx, string(id))
+	if literal == nil {
+		return nil, fmt.Errorf("fetch message %s: %w", id, err)
+	}
+	if err != nil {
+		c.log.Warn("serving message %s undecrypted: %v", id, err)
+	}
+	return literal, nil
 }
 
 func (c *mailConnector) Close(ctx context.Context) error {
@@ -63,6 +73,11 @@ func (c *mailConnector) Close(ctx context.Context) error {
 
 // Sync loads the account's folders and their messages.
 func (c *mailConnector) Sync(ctx context.Context) error {
+	// What the service remembers is only worth holding for the length of a
+	// sync: it is what keeps a conversation in several folders from being
+	// downloaded once per folder, and nothing in it expires on its own.
+	defer c.service.ForgetThreads()
+
 	mailboxes, err := c.service.ListMailboxes(ctx)
 	if err != nil {
 		return fmt.Errorf("list mailboxes: %w", err)
@@ -91,7 +106,12 @@ func (c *mailConnector) syncMailbox(ctx context.Context, mailbox api.MailboxResp
 
 	messages := make([]*imap.MessageCreated, 0, len(summaries))
 	for _, summary := range summaries {
-		message, err := toIMAPMessage(mailbox, summary)
+		literal, err := c.service.GetMessageLiteral(ctx, summary.Id)
+		if err != nil {
+			c.log.Warn("serving message %s without its body: %v", summary.Id, err)
+		}
+
+		message, err := toIMAPMessage(mailbox, summary, literal)
 		if err != nil {
 			c.log.Warn("skipping message %s: %v", summary.Id, err)
 			continue

@@ -108,6 +108,30 @@ func DecryptEnvelope(envelope Envelope, privateKey []byte, address string) (Emai
 	return DecryptEmail(encrypted, sessionKey, nil)
 }
 
+// DecryptPreview opens the preview a listing carries.
+func DecryptPreview(wrappedKeys []WrappedKey, encryptedPreview string, privateKey []byte, address string) (string, error) {
+	if encryptedPreview == "" {
+		return "", nil
+	}
+
+	sessionKey, err := sessionKeyFor(wrappedKeys, privateKey, address)
+	if err != nil {
+		return "", err
+	}
+
+	ciphertext, err := decodeOptional(encryptedPreview)
+	if err != nil {
+		return "", fmt.Errorf("crypto: decode preview: %w", err)
+	}
+
+	preview, err := DecryptSymmetrically(sessionKey, ciphertext, nil)
+	if err != nil {
+		return "", fmt.Errorf("crypto: decrypt preview: %w", err)
+	}
+
+	return string(preview), nil
+}
+
 func decodeEnvelopeCiphertexts(envelope Envelope) (EncryptedEmail, error) {
 	var (
 		encrypted EncryptedEmail

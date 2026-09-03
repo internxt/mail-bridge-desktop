@@ -59,8 +59,13 @@ func defaultPermanentFlags() imap.FlagSet {
 }
 
 // toIMAPMessage describes one message to Gluon.
-func toIMAPMessage(mailbox api.MailboxResponseDto, summary api.EmailSummaryResponseDto) (imap.MessageCreated, error) {
-	literal := summaryLiteral(summary)
+func toIMAPMessage(mailbox api.MailboxResponseDto, summary api.EmailSummaryResponseDto, literal []byte) (imap.MessageCreated, error) {
+	// Gluon stores the literal a message is created with and serves it from
+	// then on, so this is the one chance to give a client the real message.
+	// The summary stands in only when the body could not be fetched.
+	if len(literal) == 0 {
+		literal = summaryLiteral(summary)
+	}
 
 	parsed, err := imap.NewParsedMessage(literal)
 	if err != nil {

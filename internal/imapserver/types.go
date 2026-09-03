@@ -51,6 +51,7 @@ type Config struct {
 	LocalCredentials  Credentials
 	StoragePassphrase []byte
 	ConnectorFactory  ConnectorFactory
+	LogProtocol       bool
 }
 
 // IMAPServer owns a running IMAP service, its listener, and its local client
