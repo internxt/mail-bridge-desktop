@@ -1,3 +1,6 @@
+// Package smtpserver runs a local SMTP listener for desktop mail clients to
+// submit outgoing mail to. It authenticates the client and accepts
+// submissions; it does not yet send them anywhere.
 package smtpserver
 
 import (

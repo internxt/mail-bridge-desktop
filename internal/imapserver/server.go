@@ -13,6 +13,7 @@ import (
 	"github.com/ProtonMail/gluon/imap"
 
 	bridgeconfig "mail-bridge-desktop/internal/config"
+	"mail-bridge-desktop/internal/imapserver/mailconnector"
 	"mail-bridge-desktop/internal/logger"
 )
 
@@ -51,9 +52,9 @@ func Start(ctx context.Context, session UnlockedSession, config Config) (*IMAPSe
 	// Polling starts only once the server is up, and only for a connector that
 	// can synchronise. An interval of zero leaves the mailbox as the first sync
 	// left it, which is what tests want.
-	var pollers *poller
+	var pollers *mailconnector.Poller
 	if syncer != nil && config.PollInterval > 0 {
-		pollers = startPolling(ctx, syncer, config.PollInterval, logger.New("imap"))
+		pollers = mailconnector.StartPolling(ctx, syncer, config.PollInterval, logger.New("imap"))
 	}
 
 	return &IMAPServer{
@@ -134,7 +135,7 @@ func createGluonServer(config Config) (*gluon.Server, error) {
 	return gluonServer, nil
 }
 
-func connectMailbox(ctx context.Context, gluonServer *gluon.Server, session UnlockedSession, config Config) (synchronizer, error) {
+func connectMailbox(ctx context.Context, gluonServer *gluon.Server, session UnlockedSession, config Config) (mailconnector.Synchronizer, error) {
 	conn, err := config.ConnectorFactory(ctx, session, config.LocalCredentials)
 	if err != nil {
 		return nil, fmt.Errorf("create mailbox connector: %w", err)
@@ -144,7 +145,7 @@ func connectMailbox(ctx context.Context, gluonServer *gluon.Server, session Unlo
 	// the wrapper below: authConnector embeds the Connector interface, which
 	// does not declare Sync, so the method is not promoted and a type
 	// assertion on the wrapper would quietly find nothing.
-	syncer, canSync := conn.(synchronizer)
+	syncer, canSync := conn.(mailconnector.Synchronizer)
 
 	// Authorisation is enforced here rather than left to each connector, so
 	// every mailbox is reached through the same check.
@@ -221,7 +222,7 @@ func (s *IMAPServer) Close(ctx context.Context) error {
 	s.status.Credentials.Password = ""
 	s.mutex.Unlock()
 
-	pollers.stopPolling()
+	pollers.Stop()
 
 	var result error
 	if listener != nil {

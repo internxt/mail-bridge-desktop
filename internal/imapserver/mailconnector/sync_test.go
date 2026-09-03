@@ -1,4 +1,4 @@
-package imapserver
+package mailconnector
 
 import (
 	"context"
@@ -42,7 +42,7 @@ func syncService(summaries ...api.EmailSummaryResponseDto) *fakeMailService {
 }
 
 // drainUpdates collects what the sync announced, so a test can assert on it.
-func drainUpdates(c *mailConnector) []imap.Update {
+func drainUpdates(c *MailConnector) []imap.Update {
 	var updates []imap.Update
 	for {
 		select {

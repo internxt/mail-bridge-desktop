@@ -1,4 +1,4 @@
-package imapserver
+package mailconnector
 
 import (
 	"context"
@@ -13,7 +13,7 @@ import (
 
 // rememberMailboxType records what kind of folder an ID refers to, so a later
 // move can name its destination.
-func (c *mailConnector) rememberMailboxType(mailbox api.MailboxResponseDto) {
+func (c *MailConnector) rememberMailboxType(mailbox api.MailboxResponseDto) {
 	kind := mailboxType(mailbox)
 	if kind == "" {
 		return
@@ -28,7 +28,7 @@ func (c *mailConnector) rememberMailboxType(mailbox api.MailboxResponseDto) {
 
 // mailboxTypeOf returns the kind of folder an ID refers to, as learnt during
 // the sync.
-func (c *mailConnector) mailboxTypeOf(id imap.MailboxID) (api.Mailbox, error) {
+func (c *MailConnector) mailboxTypeOf(id imap.MailboxID) (api.Mailbox, error) {
 	c.mailboxTypesMutex.RLock()
 	defer c.mailboxTypesMutex.RUnlock()
 
@@ -48,17 +48,17 @@ func emailIDs(ids []imap.MessageID) []string {
 }
 
 // MarkMessagesSeen records that mail was read, or marked unread again.
-func (c *mailConnector) MarkMessagesSeen(ctx context.Context, ids []imap.MessageID, seen bool) error {
+func (c *MailConnector) MarkMessagesSeen(ctx context.Context, ids []imap.MessageID, seen bool) error {
 	return c.service.MarkRead(ctx, emailIDs(ids), seen)
 }
 
 // MarkMessagesFlagged records a client starring mail, or removing the star.
-func (c *mailConnector) MarkMessagesFlagged(ctx context.Context, ids []imap.MessageID, flagged bool) error {
+func (c *MailConnector) MarkMessagesFlagged(ctx context.Context, ids []imap.MessageID, flagged bool) error {
 	return c.service.MarkFlagged(ctx, emailIDs(ids), flagged)
 }
 
 // MoveMessages moves mail between folders.
-func (c *mailConnector) MoveMessages(ctx context.Context, ids []imap.MessageID, mboxFromID, mboxToID imap.MailboxID) (bool, error) {
+func (c *MailConnector) MoveMessages(ctx context.Context, ids []imap.MessageID, mboxFromID, mboxToID imap.MailboxID) (bool, error) {
 	destination, err := c.mailboxTypeOf(mboxToID)
 	if err != nil {
 		return false, err
@@ -74,7 +74,7 @@ func (c *mailConnector) MoveMessages(ctx context.Context, ids []imap.MessageID, 
 // The API gives an email one folder, so adding it to another is the same
 // request as moving it. A client that copies will see the original disappear,
 // which is the closest honest answer available.
-func (c *mailConnector) AddMessagesToMailbox(ctx context.Context, ids []imap.MessageID, mboxID imap.MailboxID) error {
+func (c *MailConnector) AddMessagesToMailbox(ctx context.Context, ids []imap.MessageID, mboxID imap.MailboxID) error {
 	destination, err := c.mailboxTypeOf(mboxID)
 	if err != nil {
 		return err
@@ -87,7 +87,7 @@ func (c *mailConnector) AddMessagesToMailbox(ctx context.Context, ids []imap.Mes
 //
 // Removing from the trash is the one that really deletes: an email has to live
 // somewhere, so anywhere else this moves it to the trash instead.
-func (c *mailConnector) RemoveMessagesFromMailbox(ctx context.Context, ids []imap.MessageID, mboxID imap.MailboxID) error {
+func (c *MailConnector) RemoveMessagesFromMailbox(ctx context.Context, ids []imap.MessageID, mboxID imap.MailboxID) error {
 	from, err := c.mailboxTypeOf(mboxID)
 	if err != nil {
 		return err
@@ -98,18 +98,18 @@ func (c *mailConnector) RemoveMessagesFromMailbox(ctx context.Context, ids []ima
 	return c.service.Move(ctx, emailIDs(ids), api.MailboxTrash)
 }
 
-func (c *mailConnector) CreateMailbox(ctx context.Context, name []string) (imap.Mailbox, error) {
+func (c *MailConnector) CreateMailbox(ctx context.Context, name []string) (imap.Mailbox, error) {
 	return imap.Mailbox{}, connector.ErrOperationNotAllowed
 }
 
-func (c *mailConnector) UpdateMailboxName(ctx context.Context, mboxID imap.MailboxID, newName []string) error {
+func (c *MailConnector) UpdateMailboxName(ctx context.Context, mboxID imap.MailboxID, newName []string) error {
 	return connector.ErrOperationNotAllowed
 }
 
-func (c *mailConnector) DeleteMailbox(ctx context.Context, mboxID imap.MailboxID) error {
+func (c *MailConnector) DeleteMailbox(ctx context.Context, mboxID imap.MailboxID) error {
 	return connector.ErrOperationNotAllowed
 }
 
-func (c *mailConnector) CreateMessage(ctx context.Context, mboxID imap.MailboxID, literal []byte, flags imap.FlagSet, date time.Time) (imap.Message, []byte, error) {
+func (c *MailConnector) CreateMessage(ctx context.Context, mboxID imap.MailboxID, literal []byte, flags imap.FlagSet, date time.Time) (imap.Message, []byte, error) {
 	return imap.Message{}, nil, connector.ErrOperationNotAllowed
 }

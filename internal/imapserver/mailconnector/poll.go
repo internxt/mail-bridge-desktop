@@ -1,4 +1,4 @@
-package imapserver
+package mailconnector
 
 import (
 	"context"
@@ -11,26 +11,11 @@ import (
 // caller does not say.
 const DefaultPollInterval = 30 * time.Second
 
-// synchronizer is a connector that can bring itself up to date. The mail
-// connector is one; the development fixture is not.
-type synchronizer interface {
-	Sync(context.Context) error
-}
-
-type poller struct {
-	sync     synchronizer
-	interval time.Duration
-	log      *logger.Logger
-
-	stop context.CancelFunc
-	done chan struct{}
-}
-
-// startPolling runs sync on a timer until stopPolling is called.
-func startPolling(ctx context.Context, sync synchronizer, interval time.Duration, log *logger.Logger) *poller {
+// StartPolling runs sync on a timer until Stop is called.
+func StartPolling(ctx context.Context, sync Synchronizer, interval time.Duration, log *logger.Logger) *Poller {
 	pollCtx, stop := context.WithCancel(context.WithoutCancel(ctx))
 
-	p := &poller{
+	p := &Poller{
 		sync:     sync,
 		interval: interval,
 		log:      log,
@@ -42,7 +27,7 @@ func startPolling(ctx context.Context, sync synchronizer, interval time.Duration
 	return p
 }
 
-func (p *poller) run(ctx context.Context) {
+func (p *Poller) run(ctx context.Context) {
 	defer close(p.done)
 
 	ticker := time.NewTicker(p.interval)
@@ -60,8 +45,8 @@ func (p *poller) run(ctx context.Context) {
 	}
 }
 
-// stopPolling ends the loop and waits for the cycle in flight to finish.
-func (p *poller) stopPolling() {
+// Stop ends the loop and waits for the cycle in flight to finish.
+func (p *Poller) Stop() {
 	if p == nil {
 		return
 	}

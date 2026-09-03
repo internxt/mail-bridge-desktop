@@ -1,4 +1,4 @@
-package imapserver
+package mailconnector
 
 import (
 	"context"
@@ -45,8 +45,8 @@ func (s *countingSyncer) count() int {
 
 func TestPollerRunsOnItsInterval(t *testing.T) {
 	syncer := &countingSyncer{}
-	p := startPolling(context.Background(), syncer, 10*time.Millisecond, logger.New("test"))
-	defer p.stopPolling()
+	p := StartPolling(context.Background(), syncer, 10*time.Millisecond, logger.New("test"))
+	defer p.Stop()
 
 	deadline := time.After(2 * time.Second)
 	for syncer.count() < 3 {
@@ -63,8 +63,8 @@ func TestPollerRunsOnItsInterval(t *testing.T) {
 // again.
 func TestPollerKeepsGoingAfterAFailure(t *testing.T) {
 	syncer := &countingSyncer{err: errors.New("api is down")}
-	p := startPolling(context.Background(), syncer, 10*time.Millisecond, logger.New("test"))
-	defer p.stopPolling()
+	p := StartPolling(context.Background(), syncer, 10*time.Millisecond, logger.New("test"))
+	defer p.Stop()
 
 	deadline := time.After(2 * time.Second)
 	for syncer.count() < 2 {
@@ -85,7 +85,7 @@ func TestStopPollingWaitsForTheCycleInFlight(t *testing.T) {
 		release: make(chan struct{}),
 		started: make(chan struct{}, 1),
 	}
-	p := startPolling(context.Background(), syncer, time.Millisecond, logger.New("test"))
+	p := StartPolling(context.Background(), syncer, time.Millisecond, logger.New("test"))
 
 	select {
 	case <-syncer.started:
@@ -95,7 +95,7 @@ func TestStopPollingWaitsForTheCycleInFlight(t *testing.T) {
 
 	stopped := make(chan struct{})
 	go func() {
-		p.stopPolling()
+		p.Stop()
 		close(stopped)
 	}()
 
@@ -117,6 +117,6 @@ func TestStopPollingWaitsForTheCycleInFlight(t *testing.T) {
 // TestStopPollingOnNothing keeps Close simple: a server with polling switched
 // off has no poller, and stopping it is not a special case.
 func TestStopPollingOnNothing(t *testing.T) {
-	var p *poller
-	p.stopPolling()
+	var p *Poller
+	p.Stop()
 }

@@ -1,4 +1,4 @@
-package imapserver
+package mailconnector
 
 import (
 	"fmt"

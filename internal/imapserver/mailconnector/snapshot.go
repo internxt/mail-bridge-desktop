@@ -1,4 +1,4 @@
-package imapserver
+package mailconnector
 
 import (
 	"slices"
@@ -7,15 +7,6 @@ import (
 
 	"mail-bridge-desktop/internal/api"
 )
-
-// messageState is everything about a message that can change without the
-// message itself changing: which folders hold it, and the flags a client shows.
-type messageState struct {
-	mailboxIDs []string
-	isRead     bool
-	isFlagged  bool
-	isDraft    bool
-}
 
 func stateOf(summary api.EmailSummaryResponseDto) messageState {
 	return messageState{
@@ -68,7 +59,7 @@ func (s messageState) flags() imap.FlagSet {
 
 // rememberMessages records what a sync saw, replacing what it knew about those
 // messages.
-func (c *mailConnector) rememberMessages(seen map[string]messageState) {
+func (c *MailConnector) rememberMessages(seen map[string]messageState) {
 	c.messagesMutex.Lock()
 	defer c.messagesMutex.Unlock()
 	if c.messages == nil {
@@ -81,7 +72,7 @@ func (c *mailConnector) rememberMessages(seen map[string]messageState) {
 
 // forgetMessages drops messages that are gone, so a later sync treats them as
 // new if they come back.
-func (c *mailConnector) forgetMessages(ids []string) {
+func (c *MailConnector) forgetMessages(ids []string) {
 	c.messagesMutex.Lock()
 	defer c.messagesMutex.Unlock()
 	for _, id := range ids {
@@ -90,7 +81,7 @@ func (c *mailConnector) forgetMessages(ids []string) {
 }
 
 // knownMessage returns what the last sync saw of a message.
-func (c *mailConnector) knownMessage(id string) (messageState, bool) {
+func (c *MailConnector) knownMessage(id string) (messageState, bool) {
 	c.messagesMutex.RLock()
 	defer c.messagesMutex.RUnlock()
 	state, found := c.messages[id]
@@ -99,7 +90,7 @@ func (c *mailConnector) knownMessage(id string) (messageState, bool) {
 
 // missingMessages returns the messages known before that this sync did not see
 // anywhere.
-func (c *mailConnector) missingMessages(seen map[string]messageState) []string {
+func (c *MailConnector) missingMessages(seen map[string]messageState) []string {
 	c.messagesMutex.RLock()
 	defer c.messagesMutex.RUnlock()
 
@@ -113,7 +104,7 @@ func (c *mailConnector) missingMessages(seen map[string]messageState) []string {
 }
 
 // knownMailbox reports whether a folder has been announced to Gluon already.
-func (c *mailConnector) knownMailbox(id imap.MailboxID) bool {
+func (c *MailConnector) knownMailbox(id imap.MailboxID) bool {
 	c.mailboxTypesMutex.RLock()
 	defer c.mailboxTypesMutex.RUnlock()
 	_, found := c.mailboxTypes[id]
