@@ -17,4 +17,6 @@ type Client interface {
 	GetUserFolder(ctx context.Context, token string, opts api.ListEmailsOptions) (api.EmailListResponseDto, error)
 	GetMailboxes(ctx context.Context, token string) ([]api.MailboxResponseDto, error)
 	GetThread(ctx context.Context, token, threadID string) ([]api.EmailResponseDto, error)
+	UpdateEmail(ctx context.Context, token, emailID string, update api.UpdateEmailRequestDto) error
+	DeleteEmail(ctx context.Context, token, emailID string) error
 }

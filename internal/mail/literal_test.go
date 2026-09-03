@@ -25,6 +25,10 @@ const (
 type fakeClient struct {
 	thread []api.EmailResponseDto
 	err    error
+
+	// threadCalls counts trips to the API, which is how the thread cache is
+	// checked: the saving is in not asking twice.
+	threadCalls int
 }
 
 func (f *fakeClient) GetUserFolder(ctx context.Context, token string, opts api.ListEmailsOptions) (api.EmailListResponseDto, error) {
@@ -36,7 +40,16 @@ func (f *fakeClient) GetMailboxes(ctx context.Context, token string) ([]api.Mail
 }
 
 func (f *fakeClient) GetThread(ctx context.Context, token, emailID string) ([]api.EmailResponseDto, error) {
+	f.threadCalls++
 	return f.thread, f.err
+}
+
+func (f *fakeClient) UpdateEmail(ctx context.Context, token, emailID string, update api.UpdateEmailRequestDto) error {
+	return f.err
+}
+
+func (f *fakeClient) DeleteEmail(ctx context.Context, token, emailID string) error {
+	return f.err
 }
 
 func encryptedEmail(t *testing.T) api.EmailResponseDto {
@@ -120,6 +133,48 @@ func TestGetMessageLiteralServesWhatItCannotDecrypt(t *testing.T) {
 	}
 	if !strings.Contains(string(literal), "Subject: cifrado") {
 		t.Fatalf("the message lost its headers:\n%s", literal)
+	}
+}
+
+// TestGetMessageLiteralReusesTheThread is the saving the thread cache exists
+// for: the API has no single-email endpoint, so every fetch brings back a whole
+// conversation, and asking again for a message it already returned would
+// download the same thread twice.
+func TestGetMessageLiteralReusesTheThread(t *testing.T) {
+	first := encryptedEmail(t)
+	second := first
+	second.Id = "M2"
+
+	client := &fakeClient{thread: []api.EmailResponseDto{first, second}}
+	service := testService(t, client, testPrivateKey)
+
+	for _, id := range []string{"M1", "M2"} {
+		if _, err := service.GetMessageLiteral(context.Background(), id); err != nil {
+			t.Fatalf("GetMessageLiteral(%s): %v", id, err)
+		}
+	}
+
+	if client.threadCalls != 1 {
+		t.Fatalf("asked the API %d times, want 1", client.threadCalls)
+	}
+}
+
+// TestForgetThreadsDropsTheCache keeps the cache from outliving a sync: held
+// longer, it would serve mail that has since changed.
+func TestForgetThreadsDropsTheCache(t *testing.T) {
+	client := &fakeClient{thread: []api.EmailResponseDto{encryptedEmail(t)}}
+	service := testService(t, client, testPrivateKey)
+
+	if _, err := service.GetMessageLiteral(context.Background(), "M1"); err != nil {
+		t.Fatalf("GetMessageLiteral: %v", err)
+	}
+	service.ForgetThreads()
+	if _, err := service.GetMessageLiteral(context.Background(), "M1"); err != nil {
+		t.Fatalf("GetMessageLiteral: %v", err)
+	}
+
+	if client.threadCalls != 2 {
+		t.Fatalf("asked the API %d times, want 2", client.threadCalls)
 	}
 }
 

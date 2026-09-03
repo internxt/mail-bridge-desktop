@@ -125,6 +125,26 @@ func (s *MailService) email(ctx context.Context, emailID string) (api.EmailRespo
 	return commands.PickFromThread(decrypted, emailID, s.decryptionAccount())
 }
 
+// MarkRead marks emails as read or unread.
+func (s *MailService) MarkRead(ctx context.Context, emailIDs []string, read bool) error {
+	return commands.MarkRead(ctx, s.api, s.account.Token, emailIDs, read)
+}
+
+// MarkFlagged flags or unflags emails.
+func (s *MailService) MarkFlagged(ctx context.Context, emailIDs []string, flagged bool) error {
+	return commands.MarkFlagged(ctx, s.api, s.account.Token, emailIDs, flagged)
+}
+
+// Move puts emails in another mailbox.
+func (s *MailService) Move(ctx context.Context, emailIDs []string, mailbox api.Mailbox) error {
+	return commands.Move(ctx, s.api, s.account.Token, emailIDs, mailbox)
+}
+
+// Delete removes emails for good.
+func (s *MailService) Delete(ctx context.Context, emailIDs []string) error {
+	return commands.Delete(ctx, s.api, s.account.Token, emailIDs)
+}
+
 func (s *MailService) decryptionAccount() commands.Account {
 	return commands.Account{
 		Address:    s.account.Address,
