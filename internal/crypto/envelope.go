@@ -1,6 +1,7 @@
 package crypto
 
 import (
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -9,6 +10,21 @@ import (
 )
 
 const EncryptedEmailPrefix = "INTERNXT-ENCRYPTED-EMAIL-v1"
+
+// envelopeVersion is the only wire version this package writes. Reading is
+// not restricted to it: ParseEnvelope accepts whatever version is on the
+// wire, since the web client is the one that decides when to bump it.
+const envelopeVersion = "v3"
+
+// sessionKeyLen is the symmetric key length in bytes, i.e. AES-256.
+const sessionKeyLen = 32
+
+// Recipient is one address to seal an envelope for, with their hybrid public
+// key as published by the Mail API.
+type Recipient struct {
+	Address   string
+	PublicKey []byte
+}
 
 var ErrNoWrappedKey = errors.New("crypto: no wrapped key for this address")
 
@@ -106,6 +122,48 @@ func DecryptEnvelope(envelope Envelope, privateKey []byte, address string) (Emai
 	}
 
 	return DecryptEmail(encrypted, sessionKey, nil)
+}
+
+// BuildEnvelope encrypts an email once under a fresh random session key and
+// wraps that key for every recipient. The sender's own address must be among
+// recipients so they can read their own Sent copy — this package does not add
+// it implicitly, since only the caller knows which recipient is the sender.
+func BuildEnvelope(email Email, recipients []Recipient) (Envelope, error) {
+	if len(recipients) == 0 {
+		return Envelope{}, errors.New("crypto: an envelope needs at least one recipient")
+	}
+
+	sessionKey := make([]byte, sessionKeyLen)
+	if _, err := rand.Read(sessionKey); err != nil {
+		return Envelope{}, fmt.Errorf("crypto: generate session key: %w", err)
+	}
+
+	encrypted, err := EncryptEmail(email, sessionKey, nil)
+	if err != nil {
+		return Envelope{}, err
+	}
+
+	wrappedKeys := make([]WrappedKey, 0, len(recipients))
+	for _, recipient := range recipients {
+		encryptedKey, err := EncryptKeysHybrid(sessionKey, recipient.PublicKey)
+		if err != nil {
+			return Envelope{}, fmt.Errorf("crypto: seal session key for %s: %w", recipient.Address, err)
+		}
+
+		wrappedKeys = append(wrappedKeys, WrappedKey{
+			EncryptedForEmail: recipient.Address,
+			EncryptedKey:      base64.StdEncoding.EncodeToString(encryptedKey.EncryptedKey),
+			HybridCiphertext:  base64.StdEncoding.EncodeToString(encryptedKey.HybridCiphertext),
+		})
+	}
+
+	return Envelope{
+		Version:                        envelopeVersion,
+		EncryptedText:                  base64.StdEncoding.EncodeToString(encrypted.Text),
+		EncryptedPreview:               base64.StdEncoding.EncodeToString(encrypted.Preview),
+		EncryptedAttachmentsSessionKey: base64.StdEncoding.EncodeToString(encrypted.AttachmentsSessionKey),
+		WrappedKeys:                    wrappedKeys,
+	}, nil
 }
 
 // DecryptPreview opens the preview a listing carries.

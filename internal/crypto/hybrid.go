@@ -3,6 +3,7 @@ package crypto
 import (
 	"crypto/ecdh"
 	"crypto/mlkem"
+	"crypto/rand"
 	"fmt"
 
 	"golang.org/x/crypto/sha3"
@@ -97,4 +98,81 @@ func DecryptKeysHybrid(encryptedKey HybridEncryptedKey, recipientPrivateKey []by
 	}
 
 	return key, nil
+}
+
+const (
+	mlkemPublicKeyLen  = 1184
+	x25519PublicKeyLen = 32
+	hybridPublicKeyLen = mlkemPublicKeyLen + x25519PublicKeyLen
+)
+
+// EncapsulateHybrid agrees on a secret with a recipient, knowing only their
+// public key: out comes a shared secret, plus a ciphertext only their private
+// key can open.
+//
+// publicKey is the recipient's 1216-byte hybrid public key (1184 bytes
+// ML-KEM-768 followed by 32 bytes X25519), as published by the Mail API.
+func EncapsulateHybrid(publicKey []byte) (ciphertext, sharedSecret []byte, err error) {
+	if len(publicKey) != hybridPublicKeyLen {
+		return nil, nil, fmt.Errorf("crypto: hybrid public key is %d bytes, want %d", len(publicKey), hybridPublicKeyLen)
+	}
+
+	mlkemPublicKey := publicKey[:mlkemPublicKeyLen]
+	x25519PublicKey := publicKey[mlkemPublicKeyLen:]
+
+	encapsulationKey, err := mlkem.NewEncapsulationKey768(mlkemPublicKey)
+	if err != nil {
+		return nil, nil, fmt.Errorf("crypto: load ML-KEM public key: %w", err)
+	}
+	mlkemShared, mlkemCiphertext := encapsulationKey.Encapsulate()
+
+	recipientKey, err := ecdh.X25519().NewPublicKey(x25519PublicKey)
+	if err != nil {
+		return nil, nil, fmt.Errorf("crypto: load X25519 public key: %w", err)
+	}
+
+	// The "ciphertext" on this half is the sender's own ephemeral public key:
+	// the recipient recovers the same shared secret by running ECDH against
+	// it with their private key.
+	ephemeralKey, err := ecdh.X25519().GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, nil, fmt.Errorf("crypto: generate ephemeral X25519 key: %w", err)
+	}
+	x25519Shared, err := ephemeralKey.ECDH(recipientKey)
+	if err != nil {
+		return nil, nil, fmt.Errorf("crypto: X25519 exchange: %w", err)
+	}
+	x25519Ciphertext := ephemeralKey.PublicKey().Bytes()
+
+	// Mirrors the combiner in DecapsulateHybrid: same inputs, same order. There
+	// the fourth input is the receiver's own static public key, recomputed
+	// from their private key; here it is that same static key, but as given —
+	// the recipient's, not the sender's ephemeral one.
+	var input []byte
+	input = append(input, mlkemShared...)
+	input = append(input, x25519Shared...)
+	input = append(input, x25519Ciphertext...)
+	input = append(input, x25519PublicKey...)
+	input = append(input, combinerLabel...)
+
+	shared := sha3.Sum256(input)
+
+	ciphertext = append(mlkemCiphertext, x25519Ciphertext...)
+	return ciphertext, shared[:], nil
+}
+
+// EncryptKeysHybrid wraps an email's symmetric key for one recipient: the
+// mirror of DecryptKeysHybrid.
+func EncryptKeysHybrid(sessionKey, recipientPublicKey []byte) (HybridEncryptedKey, error) {
+	ciphertext, sharedSecret, err := EncapsulateHybrid(recipientPublicKey)
+	if err != nil {
+		return HybridEncryptedKey{}, fmt.Errorf("crypto: hybrid encryption: %w", err)
+	}
+
+	encryptedKey, err := WrapKey(sessionKey, sharedSecret)
+	if err != nil {
+		return HybridEncryptedKey{}, fmt.Errorf("crypto: hybrid encryption: %w", err)
+	}
+
+	return HybridEncryptedKey{HybridCiphertext: ciphertext, EncryptedKey: encryptedKey}, nil
 }

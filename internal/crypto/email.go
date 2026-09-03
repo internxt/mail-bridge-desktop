@@ -14,6 +14,34 @@ type Email struct {
 	AttachmentsSessionKey []byte
 }
 
+// EncryptEmail is the mirror of DecryptEmail: seals the body, preview and
+// attachments session key under one caller-supplied symmetric key.
+func EncryptEmail(email Email, key, aux []byte) (EncryptedEmail, error) {
+	var encrypted EncryptedEmail
+
+	text, err := EncryptSymmetrically(key, []byte(email.Text), aux)
+	if err != nil {
+		return EncryptedEmail{}, fmt.Errorf("crypto: encrypt body: %w", err)
+	}
+	encrypted.Text = text
+
+	preview, err := EncryptSymmetrically(key, []byte(email.Preview), aux)
+	if err != nil {
+		return EncryptedEmail{}, fmt.Errorf("crypto: encrypt preview: %w", err)
+	}
+	encrypted.Preview = preview
+
+	if len(email.AttachmentsSessionKey) > 0 {
+		attachmentsKey, err := EncryptSymmetrically(key, email.AttachmentsSessionKey, aux)
+		if err != nil {
+			return EncryptedEmail{}, fmt.Errorf("crypto: encrypt attachments session key: %w", err)
+		}
+		encrypted.AttachmentsSessionKey = attachmentsKey
+	}
+
+	return encrypted, nil
+}
+
 func DecryptEmail(encrypted EncryptedEmail, key, aux []byte) (Email, error) {
 	var email Email
 

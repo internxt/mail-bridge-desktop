@@ -116,6 +116,64 @@ it keeps this hash from colliding with the same inputs hashed for another
 purpose. Every byte of it matters — a different label yields a different secret
 and an unwrap that fails with no useful clue.
 
+## Encrypting
+
+The other direction, for sending mail. Each function below is the mirror of
+one above, run in the opposite order — seal the ciphertexts first, then wrap
+the key per recipient — and built from the same primitives:
+
+```
+Email  ──▶  session key  ──▶  envelope  ──▶  text body
+        1                 2               3
+```
+
+**1. Generate a session key and seal the email** — `EncryptEmail` (email.go)
+
+A fresh random 32-byte key, used once, encrypts the body, preview and
+attachments session key with `EncryptSymmetrically` (the mirror of
+`DecryptSymmetrically`: same AES-GCM, same ciphertext‖tag‖iv layout, new
+random IV every call — reusing an IV under the same key would break GCM's
+confidentiality guarantee entirely).
+
+**2. Wrap the session key for every recipient** — `EncryptKeysHybrid` (hybrid.go)
+
+`EncapsulateHybrid(recipientPublicKey)` agrees on a shared secret with a
+recipient knowing only their public key, then `WrapKey` (the mirror of
+`UnwrapKey`) seals the session key under it. One recipient, one wrapped key;
+the sender's own address must be among them so they can read their own Sent
+copy — `BuildEnvelope` does not add it implicitly, since only the caller
+knows which recipient is the sender.
+
+**3. Assemble the envelope** — `BuildEnvelope` (envelope.go)
+
+Runs both steps and produces the same `Envelope` this package already knows
+how to read: pass a built envelope through `ParseEnvelope` and it reads back
+exactly, because it is the same struct.
+
+### Why EncapsulateHybrid has no fixed vector
+
+Every other mirror above reuses vectors already pinned for the decrypt
+direction, because the underlying algorithms are symmetric and reversible:
+AES-GCM and AES-KW are the same cipher run backwards, so a vector that proves
+`DecryptSymmetrically`/`UnwrapKey` correct also proves their mirrors correct.
+Regenerating `WrapKey`'s RFC 3394 vectors with noble's own `aeskw(...).encrypt`
+confirmed this byte for byte.
+
+Encapsulate cannot work that way: it is **randomised** by design — an
+ephemeral X25519 key plus ML-KEM's own randomness — so two calls against the
+same public key never produce the same ciphertext, and there is no single
+expected output to pin.
+
+The check that stands in for one instead is a **round trip across a real
+noble keypair**: `TestEncapsulateHybridMatchesNobleKey` (hybrid_test.go)
+encapsulates in Go against a public key noble's own `keygen` produced, then
+decapsulates the result with `DecapsulateHybrid` using the matching private
+key — the same function `TestDecapsulateHybridMatchesNoble` already proved
+agrees with noble on a real ciphertext. If the combiner or the byte layout in
+`EncapsulateHybrid` disagreed with noble's, this would fail: the private key
+is noble's, so decapsulation follows noble's exact algorithm, not Go's
+assumption about what it should do.
+
 ## Verification
 
 This is the part to read before trusting any of it.
@@ -144,13 +202,13 @@ is sensitive.
 
 ## Files
 
-| File           | What it holds                                                                |
-| -------------- | ---------------------------------------------------------------------------- |
-| `core.go`      | Package doc, plus the JS reference implementation kept verbatim in a comment |
-| `symmetric.go` | `DecryptSymmetrically` (AES-GCM), `UnwrapKey` (AES-KW)                       |
-| `hybrid.go`    | `DecapsulateHybrid`, `DecryptKeysHybrid` (ML-KEM-768 + X25519)               |
-| `email.go`     | `DecryptEmail` — the three ciphertexts under one session key                 |
-| `envelope.go`  | `IsEncryptedBody`, `ParseEnvelope`, `DecryptEnvelope`                        |
+| File           | What it holds                                                                              |
+| -------------- | ------------------------------------------------------------------------------------------- |
+| `core.go`      | Package doc, plus the JS reference implementation kept verbatim in a comment                |
+| `symmetric.go` | `DecryptSymmetrically`/`EncryptSymmetrically` (AES-GCM), `UnwrapKey`/`WrapKey` (AES-KW)      |
+| `hybrid.go`    | `DecapsulateHybrid`/`EncapsulateHybrid`, `DecryptKeysHybrid`/`EncryptKeysHybrid` (X-Wing)    |
+| `email.go`     | `DecryptEmail`/`EncryptEmail` — the three ciphertexts under one session key                  |
+| `envelope.go`  | `IsEncryptedBody`, `ParseEnvelope`, `DecryptEnvelope`, `BuildEnvelope`                       |
 
 ## If you change something here
 
