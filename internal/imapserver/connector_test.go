@@ -12,8 +12,9 @@ import (
 )
 
 type fakeMailService struct {
-	literal []byte
-	err     error
+	literal   []byte
+	err       error
+	forgotten int
 }
 
 func (f *fakeMailService) ListMailboxes(ctx context.Context) ([]api.MailboxResponseDto, error) {
@@ -27,6 +28,8 @@ func (f *fakeMailService) ListAllEmails(ctx context.Context, opts api.ListEmails
 func (f *fakeMailService) GetMessageLiteral(ctx context.Context, emailID string) ([]byte, error) {
 	return f.literal, f.err
 }
+
+func (f *fakeMailService) ForgetThreads() { f.forgotten++ }
 
 func testConnector(service MailService) *mailConnector {
 	return &mailConnector{
@@ -63,6 +66,21 @@ func TestGetMessageLiteralFailsWithoutAMessage(t *testing.T) {
 
 	if _, err := connector.GetMessageLiteral(context.Background(), "M1"); err == nil {
 		t.Fatal("expected an error when there is no message to serve")
+	}
+}
+
+// TestSyncForgetsThreadsAfterwards keeps the sync-scoped cache from outliving
+// the sync: held any longer, it would serve a client mail that has since
+// changed.
+func TestSyncForgetsThreadsAfterwards(t *testing.T) {
+	service := &fakeMailService{}
+	connector := testConnector(service)
+
+	if err := connector.Sync(context.Background()); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	if service.forgotten != 1 {
+		t.Fatalf("ForgetThreads called %d times, want 1", service.forgotten)
 	}
 }
 

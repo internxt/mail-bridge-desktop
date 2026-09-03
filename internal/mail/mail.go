@@ -10,6 +10,7 @@ package mail
 
 import (
 	"context"
+	"sync"
 
 	"mail-bridge-desktop/internal/api"
 	"mail-bridge-desktop/internal/logger"
@@ -27,13 +28,45 @@ type Account struct {
 
 // MailService turns an account session into Mail API calls.
 type MailService struct {
-	api     commands.Client
-	account Account
-	log     *logger.Logger
+	api          commands.Client
+	account      Account
+	log          *logger.Logger
+	threadsMutex sync.Mutex
+	threads      map[string]api.EmailResponseDto
 }
 
 func New(client commands.Client, account Account, log *logger.Logger) *MailService {
-	return &MailService{api: client, account: account, log: log}
+	return &MailService{
+		api:     client,
+		account: account,
+		log:     log,
+		threads: make(map[string]api.EmailResponseDto),
+	}
+}
+
+// ForgetThreads drops the messages remembered during a sync.
+func (s *MailService) ForgetThreads() {
+	s.threadsMutex.Lock()
+	defer s.threadsMutex.Unlock()
+	clear(s.threads)
+}
+
+// rememberThread indexes every message a thread returned, so the other folders
+// it appears in do not have to ask for it again.
+func (s *MailService) rememberThread(thread []api.EmailResponseDto) {
+	s.threadsMutex.Lock()
+	defer s.threadsMutex.Unlock()
+	for _, email := range thread {
+		s.threads[email.Id] = email
+	}
+}
+
+// rememberedEmail returns a message from an already fetched thread.
+func (s *MailService) rememberedEmail(emailID string) (api.EmailResponseDto, bool) {
+	s.threadsMutex.Lock()
+	defer s.threadsMutex.Unlock()
+	email, found := s.threads[emailID]
+	return email, found
 }
 
 // ListMailboxes returns the account's folders.
@@ -48,13 +81,15 @@ func (s *MailService) ListEmails(ctx context.Context, opts api.ListEmailsOptions
 
 // ListAllEmails returns every email in a folder, paging through the API.
 func (s *MailService) ListAllEmails(ctx context.Context, opts api.ListEmailsOptions) ([]api.EmailSummaryResponseDto, error) {
-	return commands.ListAllEmails(ctx, s.api, s.account.Token, opts)
+	return commands.ListAllEmails(ctx, s.api, s.account.Token, opts, s.decryptionAccount(), func(err error) {
+		s.log.Warn("listing without a preview: %v", err)
+	})
 }
 
 // GetMessageLiteral returns one email as the RFC 5322 message a mail client
 // expects, with its body decrypted when the account holds the keys.
 func (s *MailService) GetMessageLiteral(ctx context.Context, emailID string) ([]byte, error) {
-	email, decryptErr := commands.GetEmail(ctx, s.api, s.account.Token, emailID, s.decryptionAccount())
+	email, decryptErr := s.email(ctx, emailID)
 	if email.Id == "" {
 		return nil, decryptErr
 	}
@@ -64,6 +99,30 @@ func (s *MailService) GetMessageLiteral(ctx context.Context, emailID string) ([]
 		return nil, err
 	}
 	return literal, decryptErr
+}
+
+func (s *MailService) email(ctx context.Context, emailID string) (api.EmailResponseDto, error) {
+	if email, found := s.rememberedEmail(emailID); found {
+		return email, nil
+	}
+
+	thread, err := s.api.GetThread(ctx, s.account.Token, emailID)
+	if err != nil {
+		return api.EmailResponseDto{}, err
+	}
+
+	decrypted := make([]api.EmailResponseDto, 0, len(thread))
+	for _, email := range thread {
+		opened, err := commands.PickFromThread(thread, email.Id, s.decryptionAccount())
+		if err != nil {
+			s.log.Warn("remembering message %s without its body: %v", email.Id, err)
+			opened = email
+		}
+		decrypted = append(decrypted, opened)
+	}
+	s.rememberThread(decrypted)
+
+	return commands.PickFromThread(decrypted, emailID, s.decryptionAccount())
 }
 
 func (s *MailService) decryptionAccount() commands.Account {

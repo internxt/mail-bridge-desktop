@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"mail-bridge-desktop/internal/api"
+	"mail-bridge-desktop/internal/crypto"
 )
 
 // testdata/encrypted_body.txt is a real encrypted body built with the JS
@@ -54,8 +55,17 @@ func TestGetEmailDecryptsBody(t *testing.T) {
 	if got := deref(email.HtmlBody); got != testPlaintext {
 		t.Errorf("body\n got %q\nwant %q", got, testPlaintext)
 	}
-	if email.TextBody != nil {
-		t.Error("the encrypted text body should have been cleared")
+	if got := deref(email.TextBody); crypto.IsEncryptedBody(got) {
+		t.Error("the envelope should no longer be in the text body")
+	}
+
+	// The preview doubles as the plain-text part: a message with only an HTML
+	// part leaves a client nothing to summarise in its message list.
+	if email.Preview == "" {
+		t.Error("the decrypted preview was not kept")
+	}
+	if got := deref(email.TextBody); got != email.Preview {
+		t.Errorf("text part\n got %q\nwant the preview %q", got, email.Preview)
 	}
 }
 

@@ -20,7 +20,7 @@ func ListEmails(ctx context.Context, client Client, token string, opts api.ListE
 
 // ListAllEmails pages through a folder until the API runs out of emails, so
 // callers that need the whole folder do not have to handle pagination.
-func ListAllEmails(ctx context.Context, client Client, token string, opts api.ListEmailsOptions) ([]api.EmailSummaryResponseDto, error) {
+func ListAllEmails(ctx context.Context, client Client, token string, opts api.ListEmailsOptions, account Account, onPreviewError func(error)) ([]api.EmailSummaryResponseDto, error) {
 	var all []api.EmailSummaryResponseDto
 
 	for {
@@ -28,7 +28,14 @@ func ListAllEmails(ctx context.Context, client Client, token string, opts api.Li
 		if err != nil {
 			return nil, err
 		}
-		all = append(all, page.Emails...)
+
+		for _, summary := range page.Emails {
+			summary, err := decryptPreview(summary, account)
+			if err != nil && onPreviewError != nil {
+				onPreviewError(err)
+			}
+			all = append(all, summary)
+		}
 
 		// Stop when the API says there is no more, and also when a page comes
 		// back empty: without that guard a misbehaving API would loop forever.

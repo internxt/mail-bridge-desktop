@@ -10,10 +10,13 @@ import (
 	"path/filepath"
 
 	"github.com/ProtonMail/gluon"
+	"github.com/ProtonMail/gluon/imap"
 
 	bridgeconfig "mail-bridge-desktop/internal/config"
 	"mail-bridge-desktop/internal/logger"
 )
+
+const uidValidity = 1
 
 // Start prepares the IMAP service, makes the mailbox available to email
 // clients, and returns its lifecycle manager.
@@ -91,6 +94,16 @@ func createGluonServer(config Config) (*gluon.Server, error) {
 	options := []gluon.Option{
 		gluon.WithDataDir(filepath.Join(config.DataDir, "data")),
 		gluon.WithDatabaseDir(filepath.Join(config.DataDir, "database")),
+
+		// Gluon derives UIDVALIDITY from the clock by default, so every start
+		// hands a client a different one. To a mail client that means "this
+		// mailbox is not the one you knew": it discards the UIDs it had and
+		// downloads everything again, keeping the old copies, which is how one
+		// mailbox of eleven messages turns into a hundred.
+		//
+		// The mailboxes are the account's own and their identity does not
+		// change between runs, so a fixed value is the honest answer.
+		gluon.WithUIDValidityGenerator(imap.NewFixedUIDValidityGenerator(uidValidity)),
 	}
 	if config.TLSConfig != nil {
 		options = append(options, gluon.WithTLS(config.TLSConfig))

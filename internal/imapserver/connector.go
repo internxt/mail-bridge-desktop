@@ -15,9 +15,8 @@ import (
 type MailService interface {
 	ListMailboxes(ctx context.Context) ([]api.MailboxResponseDto, error)
 	ListAllEmails(ctx context.Context, opts api.ListEmailsOptions) ([]api.EmailSummaryResponseDto, error)
-
-	// GetMessageLiteral returns one email as an RFC 5322 message, decrypted.
 	GetMessageLiteral(ctx context.Context, emailID string) ([]byte, error)
+	ForgetThreads()
 }
 
 type mailConnector struct {
@@ -74,6 +73,11 @@ func (c *mailConnector) Close(ctx context.Context) error {
 
 // Sync loads the account's folders and their messages.
 func (c *mailConnector) Sync(ctx context.Context) error {
+	// What the service remembers is only worth holding for the length of a
+	// sync: it is what keeps a conversation in several folders from being
+	// downloaded once per folder, and nothing in it expires on its own.
+	defer c.service.ForgetThreads()
+
 	mailboxes, err := c.service.ListMailboxes(ctx)
 	if err != nil {
 		return fmt.Errorf("list mailboxes: %w", err)

@@ -19,7 +19,10 @@ func GetEmail(ctx context.Context, client Client, token, emailID string, account
 	if err != nil {
 		return api.EmailResponseDto{}, fmt.Errorf("get email %s: %w", emailID, err)
 	}
+	return PickFromThread(thread, emailID, account)
+}
 
+func PickFromThread(thread []api.EmailResponseDto, emailID string, account Account) (api.EmailResponseDto, error) {
 	for _, email := range thread {
 		if email.Id == emailID {
 			return decryptBody(email, account)
