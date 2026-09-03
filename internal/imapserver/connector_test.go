@@ -15,6 +15,16 @@ type fakeMailService struct {
 	literal   []byte
 	err       error
 	forgotten int
+
+	// What the connector asked of the service, so a test can check the
+	// operation reached it rather than only that no error came back.
+	writeErr      error
+	markedRead    []string
+	readValue     bool
+	markedFlagged []string
+	moved         []string
+	movedTo       api.Mailbox
+	deleted       []string
 }
 
 func (f *fakeMailService) ListMailboxes(ctx context.Context) ([]api.MailboxResponseDto, error) {
@@ -31,11 +41,34 @@ func (f *fakeMailService) GetMessageLiteral(ctx context.Context, emailID string)
 
 func (f *fakeMailService) ForgetThreads() { f.forgotten++ }
 
+func (f *fakeMailService) MarkRead(ctx context.Context, emailIDs []string, read bool) error {
+	f.markedRead = emailIDs
+	f.readValue = read
+	return f.writeErr
+}
+
+func (f *fakeMailService) MarkFlagged(ctx context.Context, emailIDs []string, flagged bool) error {
+	f.markedFlagged = emailIDs
+	return f.writeErr
+}
+
+func (f *fakeMailService) Move(ctx context.Context, emailIDs []string, mailbox api.Mailbox) error {
+	f.moved = emailIDs
+	f.movedTo = mailbox
+	return f.writeErr
+}
+
+func (f *fakeMailService) Delete(ctx context.Context, emailIDs []string) error {
+	f.deleted = emailIDs
+	return f.writeErr
+}
+
 func testConnector(service MailService) *mailConnector {
 	return &mailConnector{
-		service: service,
-		log:     logger.New("test"),
-		updates: make(chan imap.Update, updateBufferSize),
+		service:      service,
+		log:          logger.New("test"),
+		updates:      make(chan imap.Update, updateBufferSize),
+		mailboxTypes: make(map[imap.MailboxID]api.Mailbox),
 	}
 }
 

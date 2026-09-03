@@ -33,6 +33,6 @@ func ReportConnectionSettings(session control.Session, ready control.Ready) {
 
 	fmt.Println()
 	fmt.Println("The password is stored, so it stays the same across restarts.")
-	fmt.Println("IMAP serves fixture mail; SMTP accepts submissions but does not deliver them yet.")
+	fmt.Println("IMAP serves the account's mail; SMTP accepts submissions but does not send them yet.")
 	fmt.Println("Press Ctrl+C to stop.")
 }

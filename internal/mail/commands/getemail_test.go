@@ -11,6 +11,12 @@ import (
 type fakeClient struct {
 	thread []api.EmailResponseDto
 	err    error
+
+	// What the write commands asked for, so a test can check the call rather
+	// than only its result.
+	updated    []string
+	lastUpdate api.UpdateEmailRequestDto
+	deleted    []string
 }
 
 func (f *fakeClient) GetUserFolder(ctx context.Context, token string, opts api.ListEmailsOptions) (api.EmailListResponseDto, error) {
@@ -23,6 +29,17 @@ func (f *fakeClient) GetMailboxes(ctx context.Context, token string) ([]api.Mail
 
 func (f *fakeClient) GetThread(ctx context.Context, token, emailID string) ([]api.EmailResponseDto, error) {
 	return f.thread, f.err
+}
+
+func (f *fakeClient) UpdateEmail(ctx context.Context, token, emailID string, update api.UpdateEmailRequestDto) error {
+	f.updated = append(f.updated, emailID)
+	f.lastUpdate = update
+	return f.err
+}
+
+func (f *fakeClient) DeleteEmail(ctx context.Context, token, emailID string) error {
+	f.deleted = append(f.deleted, emailID)
+	return f.err
 }
 
 func TestGetEmailPicksItOutOfTheThread(t *testing.T) {

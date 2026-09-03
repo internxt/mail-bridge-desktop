@@ -17,6 +17,10 @@ type MailService interface {
 	ListAllEmails(ctx context.Context, opts api.ListEmailsOptions) ([]api.EmailSummaryResponseDto, error)
 	GetMessageLiteral(ctx context.Context, emailID string) ([]byte, error)
 	ForgetThreads()
+	MarkRead(ctx context.Context, emailIDs []string, read bool) error
+	MarkFlagged(ctx context.Context, emailIDs []string, flagged bool) error
+	Move(ctx context.Context, emailIDs []string, mailbox api.Mailbox) error
+	Delete(ctx context.Context, emailIDs []string) error
 }
 
 type mailConnector struct {
@@ -25,16 +29,19 @@ type mailConnector struct {
 
 	updates chan imap.Update
 	// Closes the Gluon instance when the connector is closed.
-	closeOnce sync.Once
+	closeOnce         sync.Once
+	mailboxTypesMutex sync.RWMutex
+	mailboxTypes      map[imap.MailboxID]api.Mailbox
 }
 
 // NewMailConnectorFactory serves the account's own mail, rather than a fixture.
 func NewMailConnectorFactory(service MailService, log *logger.Logger) ConnectorFactory {
 	return func(ctx context.Context, session UnlockedSession, credentials Credentials) (connector.Connector, error) {
 		return &mailConnector{
-			service: service,
-			log:     log,
-			updates: make(chan imap.Update, updateBufferSize),
+			service:      service,
+			log:          log,
+			updates:      make(chan imap.Update, updateBufferSize),
+			mailboxTypes: make(map[imap.MailboxID]api.Mailbox),
 		}, nil
 	}
 }
@@ -95,6 +102,7 @@ func (c *mailConnector) Sync(ctx context.Context) error {
 
 // syncMailbox announces one folder and the messages it holds.
 func (c *mailConnector) syncMailbox(ctx context.Context, mailbox api.MailboxResponseDto) error {
+	c.rememberMailboxType(mailbox)
 	c.updates <- imap.NewMailboxCreated(toIMAPMailbox(mailbox))
 
 	summaries, err := c.service.ListAllEmails(ctx, api.ListEmailsOptions{

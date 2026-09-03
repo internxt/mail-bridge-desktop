@@ -1,48 +1,84 @@
 # Mail Bridge desktop
 
-This project provides local IMAP and SMTP bridge foundations. IMAP uses
-[Gluon](https://github.com/ProtonMail/gluon); SMTP currently accepts local
-submissions but does not yet deliver them through the backend.
+A local IMAP and SMTP server that lets an ordinary mail client read Internxt
+mail. Messages are encrypted on the server, so the bridge fetches them, decrypts
+them on the machine and serves them as ordinary MIME. IMAP uses
+[Gluon](https://github.com/ProtonMail/gluon).
+
+## Running it in development
+
+The bridge does not start on its own. It expects a parent — the desktop app — to
+connect over a control channel and hand it the account's session: the API token,
+the encryption key, and the password a mail client will use. `cmd/devcontrol`
+stands in for that parent, so two terminals are needed:
+
+```
+make dev-control    # the stand-in parent, waits for the bridge
+make run            # the bridge itself
+```
+
+`dev-control` prints the settings to put in a mail client once the bridge is up.
+The password it generates is kept in `.bridge-data/`, so it survives restarts and
+the client does not have to be reconfigured.
+
+Before the first run, copy `.env.example` to `.env` and fill in the account:
+
+| Variable | What it is |
+| --- | --- |
+| `BRIDGE_DEV_EMAIL` | The address to serve |
+| `BRIDGE_DEV_TOKEN` | Mail API token |
+| `BRIDGE_DEV_ENCRYPTION_PRIVATE_KEY` | The account's mail key, base64 of 32 bytes |
+| `MAIL_API_URL` | Where the Mail API runs |
+
+Without the key the bridge still runs: it lists mail and serves what it cannot
+decrypt as it arrived, which is also what happens for a message encrypted for
+another address.
+
+`make help` lists every target.
+
+### When mail looks wrong
+
+Gluon stores the message it is given during the initial sync and serves that copy
+from then on. **Any change to how a message is built only shows up after clearing
+its cache:**
+
+```
+rm -rf .bridge-data/data .bridge-data/database
+```
+
+Stop the bridge first, or it writes the cache back on exit. Leave
+`.bridge-data/dev-mail-password` alone unless you want to reconfigure the client.
+
+To see what a client is actually asking for, set `BRIDGE_LOG_IMAP_PROTOCOL=true`
+and the IMAP conversation goes to the log, each line marked with the side it came
+from. It carries subjects and bodies, so it is for debugging rather than for a
+running bridge.
+
+## Connecting a mail client
+
+IMAP on `127.0.0.1:1143` and SMTP on `127.0.0.1:2025`, with the username and
+password `dev-control` printed, and **no encryption** — the connection never
+leaves the machine, but a client that insists on TLS will refuse it.
 
 ## Environment
 
-Copy `.env.example` to `.env` to override local development settings. The
-shared `BRIDGE_HOST` defaults to `127.0.0.1` and is used for local protocol
-listeners; `BRIDGE_IMAP_PORT` and `BRIDGE_SMTP_PORT` set their ports. Keep the
-host loopback-only. Process environment variables override values in `.env`.
-Calls to `imapserver.Start` that omit `ListenAddress` use `BRIDGE_HOST` and
-`BRIDGE_IMAP_PORT` as well.
-
-## Run the development IMAP server
-
-Install Go 1.27, then run:
-
-```powershell
-$env:CGO_ENABLED = "1"
-$env:CC = '"C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\Llvm\x64\bin\clang.exe"'
-go run ./cmd/bridge
-```
-
-Gluon uses SQLite through CGO. The compiler path above is available with the
-Visual Studio C++/LLVM tools used by this development environment. On another
-machine, point `CC` at an installed C compiler instead.
-
-The command starts both local IMAP and SMTP. It prints the IMAP address and a
-generated password. IMAP serves one fixture message from an in-memory
-development mailbox; SMTP accepts development submissions but does not yet
-deliver them through the backend. Press `Ctrl+C` to stop both services.
-
-The development command has no TLS so it is only suitable for local protocol
-testing. The `imapserver.Config` API accepts a TLS configuration and enables
-IMAP STARTTLS when one is supplied.
+Copy `.env.example` to `.env` to override local settings. `BRIDGE_HOST` defaults
+to `127.0.0.1` and `BRIDGE_IMAP_PORT` / `BRIDGE_SMTP_PORT` set the ports. Keep
+the host loopback-only. Process environment variables override values in `.env`.
 
 ## Authentication and encrypted mail
 
-The IMAP process never accepts the user's main account password. The desktop
-application must first authenticate and unlock the account's encryption keys,
-then pass an `UnlockedSession` to `imapserver.Start`. A future production
-Gluon connector will fetch encrypted data from the backend, decrypt it locally
-into MIME messages, and apply local IMAP changes back to the backend API.
+The bridge never sees the user's main account password. The desktop app
+authenticates, unlocks the account's keys and sends them over the control
+channel, where they stay in memory for as long as the process runs: nothing about
+the account is written to disk, so signing out is a matter of stopping the
+bridge.
+
+The one exception is the passphrase encrypting Gluon's cache, which the parent
+does not send. It is stored, because regenerating it would leave the cache
+unreadable and resynchronise every mailbox on each start.
+
+[`internal/crypto`](internal/crypto/README.md) documents how mail is decrypted.
 
 ## Using it on the desktop apps
 

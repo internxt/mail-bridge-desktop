@@ -67,15 +67,40 @@ func (c *Client) GetMailboxes(ctx context.Context, token string) ([]MailboxRespo
 	return res, err
 }
 
+// UpdateEmail is used for move, flag, read/unread, etc.
+func (c *Client) UpdateEmail(ctx context.Context, token, emailID string, update UpdateEmailRequestDto) error {
+	return c.do(ctx, request{
+		svc:    c.mail,
+		method: http.MethodPatch,
+		path:   emailPath + "/" + escapeID(emailID),
+		token:  token,
+		body:   update,
+	}, nil)
+}
+
+// DeleteEmail removes an email for good.
+func (c *Client) DeleteEmail(ctx context.Context, token, emailID string) error {
+	return c.do(ctx, request{
+		svc:    c.mail,
+		method: http.MethodDelete,
+		path:   emailPath + "/" + escapeID(emailID),
+		token:  token,
+	}, nil)
+}
+
 func (c *Client) GetThread(ctx context.Context, token, threadID string) ([]EmailResponseDto, error) {
 	var res []EmailResponseDto
 
 	err := c.do(ctx, request{
 		svc:    c.mail,
 		method: http.MethodGet,
-		path:   emailThreadsPath + url.PathEscape(threadID),
+		path:   emailThreadsPath + escapeID(threadID),
 		token:  token,
 	}, &res)
 
 	return res, err
+}
+
+func escapeID(id string) string {
+	return url.PathEscape(id)
 }
