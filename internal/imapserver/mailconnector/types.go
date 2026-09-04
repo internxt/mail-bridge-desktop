@@ -24,6 +24,7 @@ type MailService interface {
 	Move(ctx context.Context, emailIDs []string, mailbox api.Mailbox) error
 	Delete(ctx context.Context, emailIDs []string) error
 	SaveDraft(ctx context.Context, raw []byte) (string, error)
+	DiscardDrafts(ctx context.Context, draftIDs []string) error
 }
 
 // MailConnector is the Gluon connector.Connector implementation that serves
