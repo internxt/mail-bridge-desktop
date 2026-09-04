@@ -23,12 +23,13 @@ the client does not have to be reconfigured.
 
 Before the first run, copy `.env.example` to `.env` and fill in the account:
 
-| Variable | What it is |
-| --- | --- |
-| `BRIDGE_DEV_EMAIL` | The address to serve |
-| `BRIDGE_DEV_TOKEN` | Mail API token |
-| `BRIDGE_DEV_ENCRYPTION_PRIVATE_KEY` | The account's mail key, base64 of 32 bytes |
-| `MAIL_API_URL` | Where the Mail API runs |
+| Variable                            | What it is                                                                                                                                                                                                                        |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `BRIDGE_DEV_EMAIL`                  | The address to serve                                                                                                                                                                                                              |
+| `BRIDGE_DEV_TOKEN`                  | Mail API token                                                                                                                                                                                                                    |
+| `BRIDGE_DEV_ENCRYPTION_PRIVATE_KEY` | The account's mail key, base64 of 32 bytes                                                                                                                                                                                        |
+| `MAIL_API_URL`                      | Where the Mail API runs                                                                                                                                                                                                           |
+| `MAIL_SERVER_PUBLIC_KEY`            | The Mail API's own public key, base64. Seals mail sent to a recipient without an Internxt key of their own, so it reaches the backend encrypted and never travels in the clear to whatever external provider serves that address. |
 
 Without the key the bridge still runs: it lists mail and serves what it cannot
 decrypt as it arrived, which is also what happens for a message encrypted for
@@ -78,7 +79,7 @@ The one exception is the passphrase encrypting Gluon's cache, which the parent
 does not send. It is stored, because regenerating it would leave the cache
 unreadable and resynchronise every mailbox on each start.
 
-[`internal/crypto`](internal/crypto/README.md) documents how mail is decrypted.
+[`internal/crypto`](internal/crypto/README.md) documents how the encryption for mail works.
 
 ## Using it on the desktop apps
 
@@ -91,11 +92,11 @@ Every bridge Git tag in the form `vMAJOR.MINOR.PATCH` publishes a GitHub
 Release (or an equivalent immutable artifact store) with the following assets.
 `VERSION` below is the tag without its leading `v`.
 
-| Target | Archive | Executable inside archive |
-| --- | --- | --- |
-| Windows x64 | `mail-bridge_VERSION_windows_amd64.zip` | `mail-bridge.exe` |
-| Linux x64 | `mail-bridge_VERSION_linux_amd64.tar.gz` | `mail-bridge` |
-| macOS Apple Silicon | `mail-bridge_VERSION_darwin_arm64.tar.gz` | `mail-bridge` |
+| Target              | Archive                                   | Executable inside archive |
+| ------------------- | ----------------------------------------- | ------------------------- |
+| Windows x64         | `mail-bridge_VERSION_windows_amd64.zip`   | `mail-bridge.exe`         |
+| Linux x64           | `mail-bridge_VERSION_linux_amd64.tar.gz`  | `mail-bridge`             |
+| macOS Apple Silicon | `mail-bridge_VERSION_darwin_arm64.tar.gz` | `mail-bridge`             |
 
 Each archive contains exactly one executable at the archive root. It must not
 contain a directory named after the version or target. This makes the path

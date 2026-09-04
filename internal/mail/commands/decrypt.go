@@ -11,6 +11,7 @@ import (
 type Account struct {
 	Address    string
 	PrivateKey []byte
+	PublicKey  []byte
 }
 
 // ready reports whether the account can decrypt anything.

@@ -52,6 +52,18 @@ func (f *fakeClient) DeleteEmail(ctx context.Context, token, emailID string) err
 	return f.err
 }
 
+func (f *fakeClient) LookupRecipientKeys(ctx context.Context, token string, addresses []string) ([]api.RecipientKeyDto, error) {
+	return nil, f.err
+}
+
+func (f *fakeClient) SendEmail(ctx context.Context, token string, email api.SendEmailRequestDto) (api.EmailCreatedResponseDto, error) {
+	return api.EmailCreatedResponseDto{}, f.err
+}
+
+func (f *fakeClient) GetMailAccountKeys(ctx context.Context, token string) (api.MailAccountKeysResponseDto, error) {
+	return api.MailAccountKeysResponseDto{}, f.err
+}
+
 func encryptedEmail(t *testing.T) api.EmailResponseDto {
 	t.Helper()
 	body, err := os.ReadFile("commands/testdata/encrypted_body.txt")
@@ -84,7 +96,7 @@ func testService(t *testing.T, client *fakeClient, privateKey string) *MailServi
 		Token:      "tok",
 		Address:    testAddress,
 		PrivateKey: key,
-	}, logger.New("test"))
+	}, nil, logger.New("test"))
 }
 
 // decodeQuotedPrintable undoes the transfer encoding BuildLiteral applies, so

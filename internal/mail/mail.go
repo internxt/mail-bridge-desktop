@@ -10,6 +10,8 @@ package mail
 
 import (
 	"context"
+	"encoding/base64"
+	"fmt"
 	"sync"
 
 	"mail-bridge-desktop/internal/api"
@@ -28,20 +30,40 @@ type Account struct {
 
 // MailService turns an account session into Mail API calls.
 type MailService struct {
-	api          commands.Client
-	account      Account
-	log          *logger.Logger
-	threadsMutex sync.Mutex
-	threads      map[string]api.EmailResponseDto
+	api             commands.Client
+	account         Account
+	log             *logger.Logger
+	threadsMutex    sync.Mutex
+	threads         map[string]api.EmailResponseDto
+	serverPublicKey []byte
+	ownPublicKey    []byte
 }
 
-func New(client commands.Client, account Account, log *logger.Logger) *MailService {
+func New(client commands.Client, account Account, serverPublicKey []byte, log *logger.Logger) *MailService {
 	return &MailService{
-		api:     client,
-		account: account,
-		log:     log,
-		threads: make(map[string]api.EmailResponseDto),
+		api:             client,
+		account:         account,
+		log:             log,
+		threads:         make(map[string]api.EmailResponseDto),
+		serverPublicKey: serverPublicKey,
 	}
+}
+
+// Init fetches the account's own public key, so the sender can read their
+// own Sent copy of anything they send.
+func (s *MailService) Init(ctx context.Context) error {
+	keys, err := s.api.GetMailAccountKeys(ctx, s.account.Token)
+	if err != nil {
+		return fmt.Errorf("get account keys: %w", err)
+	}
+
+	publicKey, err := base64.StdEncoding.DecodeString(keys.PublicKey)
+	if err != nil {
+		return fmt.Errorf("decode account public key: %w", err)
+	}
+
+	s.ownPublicKey = publicKey
+	return nil
 }
 
 // ForgetThreads drops the messages remembered during a sync.
@@ -145,9 +167,20 @@ func (s *MailService) Delete(ctx context.Context, emailIDs []string) error {
 	return commands.Delete(ctx, s.api, s.account.Token, emailIDs)
 }
 
+// SendEmail parses a raw RFC 5322 message an SMTP client handed over, seals
+// it for every recipient, and submits it.
+func (s *MailService) SendEmail(ctx context.Context, raw []byte, envelopeRecipients []string) error {
+	msg, err := ParseOutgoingMessage(raw, envelopeRecipients)
+	if err != nil {
+		return err
+	}
+	return commands.SendEmail(ctx, s.api, s.account.Token, msg, s.decryptionAccount(), s.serverPublicKey)
+}
+
 func (s *MailService) decryptionAccount() commands.Account {
 	return commands.Account{
 		Address:    s.account.Address,
 		PrivateKey: s.account.PrivateKey,
+		PublicKey:  s.ownPublicKey,
 	}
 }

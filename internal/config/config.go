@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"net"
 	"os"
 
@@ -25,5 +26,17 @@ func Load() Config {
 		SMTPDomain:      env("BRIDGE_SMTP_DOMAIN", "localhost"),
 		MailAPI:         env("MAIL_API_URL", ""),
 		LogImapProtocol: env("BRIDGE_LOG_IMAP_PROTOCOL", "") == "true",
+		ServerPublicKey: decodeServerPublicKey(env("MAIL_SERVER_PUBLIC_KEY", "")),
 	}
+}
+
+func decodeServerPublicKey(encoded string) []byte {
+	if encoded == "" {
+		return nil
+	}
+	key, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return nil
+	}
+	return key
 }
