@@ -12,10 +12,12 @@ import (
 	"time"
 
 	"github.com/ProtonMail/gluon/connector"
+	gluonstore "github.com/ProtonMail/gluon/store"
 
 	"mail-bridge-desktop/internal/api"
 	"mail-bridge-desktop/internal/control"
 	"mail-bridge-desktop/internal/imapserver"
+	"mail-bridge-desktop/internal/imapserver/attachmentstore"
 	"mail-bridge-desktop/internal/imapserver/mailconnector"
 	"mail-bridge-desktop/internal/logger"
 	"mail-bridge-desktop/internal/mail"
@@ -95,6 +97,7 @@ func startIMAP(ctx context.Context, options Options, session control.Session, se
 		},
 		StoragePassphrase: passphrase,
 		ConnectorFactory:  connectorFactory(service),
+		StoreBuilder:      attachmentStoreBuilder(service),
 		LogProtocol:       options.Config.LogImapProtocol,
 		PollInterval:      mailconnector.DefaultPollInterval,
 	})
@@ -117,6 +120,22 @@ func connectorFactory(service *mail.MailService) imapserver.ConnectorFactory {
 	return func(ctx context.Context, _ imapserver.UnlockedSession, _ imapserver.Credentials) (connector.Connector, error) {
 		return mailconnector.New(service, imapLog), nil
 	}
+}
+
+// attachmentStoreBuilder keeps attachments out of the sync: messages are
+// stored with their attachments declared but empty, and the files are fetched
+// the first time a client opens one. Without a mail service there is nothing
+// to fetch them from, so Gluon keeps its own store.
+func attachmentStoreBuilder(service *mail.MailService) gluonstore.Builder {
+	if service == nil {
+		return nil
+	}
+	return attachmentstore.NewBuilder(
+		&gluonstore.OnDiskStoreBuilder{},
+		service,
+		mail.MessageIDDomain,
+		logger.New("imap"),
+	)
 }
 
 // mailService builds the service that reads and sends the account's mail,

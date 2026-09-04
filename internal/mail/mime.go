@@ -13,9 +13,9 @@ import (
 	"mail-bridge-desktop/internal/api"
 )
 
-// messageIDDomain labels the Message-IDs the bridge generates for emails the
+// MessageIDDomain labels the Message-IDs the bridge generates for emails the
 // API returns without one.
-const messageIDDomain = "mail-bridge.internxt.local"
+const MessageIDDomain = "mail-bridge.internxt.local"
 
 // BuildLiteral turns an email into the RFC 5322 message an IMAP client expects.
 func BuildLiteral(email api.EmailResponseDto) ([]byte, error) {
@@ -122,7 +122,7 @@ func writeQuotedPrintable(buf *bytes.Buffer, body string) error {
 // messageID reuses the email's own identifier, so refetching the same email
 // yields the same Message-ID and clients do not duplicate it.
 func messageID(email api.EmailResponseDto) string {
-	return fmt.Sprintf("<%s@%s>", email.Id, messageIDDomain)
+	return fmt.Sprintf("<%s@%s>", email.Id, MessageIDDomain)
 }
 
 // boundary derives a separator from the content, keeping the literal stable

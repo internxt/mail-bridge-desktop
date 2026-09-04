@@ -110,17 +110,47 @@ func (s *MailService) ListAllEmails(ctx context.Context, opts api.ListEmailsOpti
 
 // GetMessageLiteral returns one email as the RFC 5322 message a mail client
 // expects, with its body decrypted when the account holds the keys.
+//
+// Attachments are declared but left empty: this is what the sync stores, so a
+// client is told the message's real size and structure without a byte of any
+// attachment having been downloaded. ResolveAttachments fills them in when a
+// client actually opens the message.
 func (s *MailService) GetMessageLiteral(ctx context.Context, emailID string) ([]byte, error) {
 	email, decryptErr := s.email(ctx, emailID)
 	if email.Id == "" {
 		return nil, decryptErr
 	}
 
-	literal, err := BuildLiteral(email)
+	literal, err := BuildLiteralWithAttachments(email, nil)
 	if err != nil {
 		return nil, err
 	}
 	return literal, decryptErr
+}
+
+// ResolveAttachments rebuilds an email's message with its attachments in
+// place, downloading and decrypting them.
+func (s *MailService) ResolveAttachments(ctx context.Context, emailID string, literal []byte) ([]byte, error) {
+	email, err := s.rawEmail(ctx, emailID)
+	if err != nil {
+		return nil, err
+	}
+	if len(email.Attachments) == 0 {
+		return literal, nil
+	}
+
+	blobs, err := commands.DownloadAttachments(ctx, s.api, s.account.Token, email, s.decryptionAccount(), func(err error) {
+		s.log.Warn("serving message %s without one of its attachments: %v", emailID, err)
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	opened, err := commands.PickFromThread([]api.EmailResponseDto{email}, emailID, s.decryptionAccount())
+	if err != nil {
+		return nil, err
+	}
+	return BuildLiteralWithAttachments(opened, blobs)
 }
 
 func (s *MailService) email(ctx context.Context, emailID string) (api.EmailResponseDto, error) {
@@ -145,6 +175,24 @@ func (s *MailService) email(ctx context.Context, emailID string) (api.EmailRespo
 	s.rememberThread(decrypted)
 
 	return commands.PickFromThread(decrypted, emailID, s.decryptionAccount())
+}
+
+// rawEmail returns the email as the API sent it, envelope and all.
+func (s *MailService) rawEmail(ctx context.Context, emailID string) (api.EmailResponseDto, error) {
+	thread, err := s.api.GetThread(ctx, s.account.Token, emailID)
+	if err != nil {
+		return api.EmailResponseDto{}, err
+	}
+
+	for _, email := range thread {
+		if email.Id == emailID {
+			return email, nil
+		}
+	}
+	if len(thread) == 1 {
+		return thread[0], nil
+	}
+	return api.EmailResponseDto{}, fmt.Errorf("get email %s: %w", emailID, commands.ErrEmailNotFound)
 }
 
 // MarkRead marks emails as read or unread.

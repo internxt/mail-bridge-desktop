@@ -32,6 +32,11 @@ type fakeClient struct {
 	saveDraftErr    error
 	saveDraftCalled bool
 	discardedDraft  string
+
+	// What the attachment downloads returned, and which were asked for.
+	blobs           map[string][]byte
+	downloadedBlobs []string
+	downloadErr     error
 }
 
 func (f *fakeClient) GetUserFolder(ctx context.Context, token string, opts api.ListEmailsOptions) (api.EmailListResponseDto, error) {
@@ -86,6 +91,14 @@ func (f *fakeClient) SaveDraft(ctx context.Context, token string, draft api.Draf
 func (f *fakeClient) DiscardDraft(ctx context.Context, token, draftID string) error {
 	f.discardedDraft = draftID
 	return f.err
+}
+
+func (f *fakeClient) DownloadAttachment(ctx context.Context, token, emailID, blobID string) ([]byte, error) {
+	f.downloadedBlobs = append(f.downloadedBlobs, blobID)
+	if f.downloadErr != nil {
+		return nil, f.downloadErr
+	}
+	return f.blobs[blobID], nil
 }
 
 func TestGetEmailPicksItOutOfTheThread(t *testing.T) {

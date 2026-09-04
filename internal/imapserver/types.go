@@ -9,6 +9,7 @@ import (
 
 	"github.com/ProtonMail/gluon"
 	"github.com/ProtonMail/gluon/connector"
+	"github.com/ProtonMail/gluon/store"
 
 	"mail-bridge-desktop/internal/imapserver/mailconnector"
 )
@@ -56,6 +57,7 @@ type Config struct {
 	ConnectorFactory  ConnectorFactory
 	LogProtocol       bool
 	PollInterval      time.Duration
+	StoreBuilder      store.Builder
 }
 
 // IMAPServer owns a running IMAP service, its listener, and its local client

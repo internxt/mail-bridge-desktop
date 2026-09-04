@@ -8,6 +8,7 @@ import (
 	"github.com/ProtonMail/gluon/imap"
 
 	"mail-bridge-desktop/internal/api"
+	"mail-bridge-desktop/internal/mail"
 )
 
 const inboxName = "INBOX"
@@ -116,16 +117,41 @@ func summaryLiteral(summary api.EmailSummaryResponseDto) []byte {
 	var message strings.Builder
 
 	message.WriteString("MIME-Version: 1.0\r\n")
-	fmt.Fprintf(&message, "Message-ID: <%s@mail-bridge.internxt.local>\r\n", summary.Id)
+	fmt.Fprintf(&message, "Message-ID: <%s@%s>\r\n", summary.Id, mail.MessageIDDomain)
 	fmt.Fprintf(&message, "Date: %s\r\n", receivedAt(summary).Format(time.RFC1123Z))
 	fmt.Fprintf(&message, "Subject: %s\r\n", headerValue(summary.Subject))
 	fmt.Fprintf(&message, "From: %s\r\n", addressList(summary.From))
+
+	if summary.HasAttachment {
+		writeSummaryWithAttachment(&message, summary)
+		return []byte(message.String())
+	}
+
 	message.WriteString("Content-Type: text/plain; charset=\"utf-8\"\r\n")
 	message.WriteString("\r\n")
 	message.WriteString(headerValue(summary.Preview))
 	message.WriteString("\r\n")
 
 	return []byte(message.String())
+}
+
+func writeSummaryWithAttachment(message *strings.Builder, summary api.EmailSummaryResponseDto) {
+	boundary := "summary" + summary.Id
+
+	fmt.Fprintf(message, "Content-Type: multipart/mixed; boundary=%q\r\n\r\n", boundary)
+
+	fmt.Fprintf(message, "--%s\r\n", boundary)
+	message.WriteString("Content-Type: text/plain; charset=\"utf-8\"\r\n\r\n")
+	message.WriteString(headerValue(summary.Preview))
+	message.WriteString("\r\n")
+
+	fmt.Fprintf(message, "--%s\r\n", boundary)
+	message.WriteString("Content-Type: application/octet-stream\r\n")
+	message.WriteString("Content-Transfer-Encoding: base64\r\n")
+	message.WriteString("Content-Disposition: attachment\r\n\r\n")
+	message.WriteString("\r\n")
+
+	fmt.Fprintf(message, "--%s--\r\n", boundary)
 }
 
 func addressList(addresses []api.EmailAddressDto) string {
