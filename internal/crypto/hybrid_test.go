@@ -89,6 +89,103 @@ func TestDecapsulateHybridRejectsMalformedInput(t *testing.T) {
 	})
 }
 
+// nobleRecipientPublicKey is the public key noble's keygen(vectorSeed)
+// produces, generated once with the real @noble/post-quantum library:
+//
+//	const keys = hybridCipher.keygen(seed); // seed = 0x00..0x1f
+//
+// vectorSeed (see above) is that same keypair's private key, already proven
+// interoperable: TestDecapsulateHybridMatchesNoble decapsulates a ciphertext
+// noble generated for this exact keypair.
+const nobleRecipientPublicKey = "6f54098a0a0e641146614b6960ba60d8603d62f447f9ab499b47bd6906cc40b061d8634a3e88906f284958e7441ca6c725cbb97095b7671a462b6681c9e6580bbc8d60b149fa60261043afbba52f205a6028384851596adf371abea98d3347383d2bb673438f6783612bf87014f7b91a89740265345df679340473d1c4c176886e5e29b8f058bb7c735316686cff5c3beb8c261cb00970a69c1afcc54b94cb86e1ce63ba636e395ca45101e21c7bd04c313ea19af24141efd2ad44416a25ba4f65910ef7d8809c3093f04aaf00e3cd96e35c4aa3c802c18ad6f39da4b4b8d98c8bd7902d83a07ba45396674a60243cab93e80fd9b1c8777376a9cc0d6fa115e2639380b9c6be7848bd13588c64703a0535d19a0f81633a976a0a105b66ee285d0fd255e82c0331925f4383b6efc761ef6099235a0b98726358aa9d01b8b896519f921474bb7c14bb22252b5c2f10d41246c9b23e7644849367f541a15f63bc928a39bb7bc73f07b665c496bb6558c8f45489a72ec4bacd34e9c594c33871b723f03495e88b4391ab26e43043deb6117b3919e45c4c1b16ab28e47ddd723663854766192fc1806ca70abb786cbdb30932e68c8a370bcfb07983a012c3266b93efa62657f4b838374cb0bb95e0ec06541b0765d99cf153bc6b96135ca780a55b3647789e31915e46283cf9c7bb6e8453fb6682105141f1dc0d00d85eed703b6c6c961f79c845276b4248949c06782e513eb2991b95d96042e38cbeda352449b2b5084ebda5226a6206400789130a3096449848b629feea4a2c2a743c4a0ddc9cb3f3d676fc563731b26c4a1a66dc8459170056d57697f1443b81a9a34412bb7bf05f3327575a5911dd301d6053867f3c3080711f1bf11587b0bb2984276b2685e7756210e4b3f8955384231e558c6f510c91e0fc56b5d1885ff2949e95a46bc1bee1fa71f5027e10c443b0e91d0fd7440f467a27221212e88f5c6ba64296cae0d207bfc60f88c7cfb5c45aa1839d18cb37c45843e5426a4a90c802b6428f953c359c4ac0603452fac0b7361e2fd35dcc885a92145d4fca0158f1b7d70b4bcd118e4a2a4154438df310c44a9a1b99ea415907267a88b0624241579c1722f46ed61c2e3eca545c9970517175399b800db25da39593d06490d7142c00e88d2db047e9898bdb7acb7ed907f6e30416cc0de54a242c0a2126302f5d54c85bc66ac2f83c797945b5067caa42bd2e0c19ca97506e507ab0a5c9f5633708499c19f24aec513bd3903a5d73b6ec4991f7c72eb991c1c37889805cb1ea38a0cc02176b27c58d638ce5a32668457cf9b9be027ca0214057971725d54102e8996716eb2ad823453b605b855370b1b21b3932cded4160aa9973c7ebae5ac4764d94cf7cc9506f077bad73012dbb4ac8140a38746412eb33c9514596205f707635862217d9b60918c6268d9344915b847a2476c1a270f154a5c84234165acfc869398702cea9e9a07e7b0e99ea9bdcb7841fe9c0fa25c8338092561a3edddc7001f478ad65781a6024aad165d9b6979adac448a4462f564685527f762434fe9a425a84437b457392eca80c913506151e3a13239f342fca7655b6eaae845a221ceb3e67f5639c6193f6fdeef57e399b808b7f3aa2b5740aaded90163dc5d775c9faf7f1fbd075dab344e9d7d146647281fbba7b3c56cafd5833b7a930ec4206e7c3a6d7764fe81d7a"
+
+// TestEncapsulateHybridDecapsulatesToItself is a plain round trip within Go:
+// encapsulating against a public key and decapsulating the resulting
+// ciphertext against the matching private key must agree on the same shared
+// secret.
+func TestEncapsulateHybridDecapsulatesToItself(t *testing.T) {
+	publicKey := mustHex(t, nobleRecipientPublicKey)
+
+	ciphertext, sharedSecret, err := EncapsulateHybrid(publicKey)
+	if err != nil {
+		t.Fatalf("EncapsulateHybrid: %v", err)
+	}
+	if len(ciphertext) != hybridCiphertextLen {
+		t.Fatalf("ciphertext is %d bytes, want %d", len(ciphertext), hybridCiphertextLen)
+	}
+
+	got, err := DecapsulateHybrid(ciphertext, mustHex(t, vectorSeed))
+	if err != nil {
+		t.Fatalf("DecapsulateHybrid: %v", err)
+	}
+	if !bytes.Equal(got, sharedSecret) {
+		t.Errorf("shared secret\n got %X\nwant %X", got, sharedSecret)
+	}
+}
+
+// TestEncapsulateHybridMatchesNobleKey is the interop check: it encapsulates
+// in Go against a public key noble itself generated (nobleRecipientPublicKey),
+// then decapsulates with the matching private key (vectorSeed) using our
+// DecapsulateHybrid, already proven to agree with noble on real ciphertexts.
+//
+// Encapsulate is randomised — an ephemeral X25519 key plus ML-KEM randomness —
+// so there is no fixed ciphertext to pin, the way there is for decapsulate.
+// This is the strongest check available instead: a keypair noble actually
+// produced, opened correctly by the half of this package noble's own output
+// already validates.
+func TestEncapsulateHybridMatchesNobleKey(t *testing.T) {
+	publicKey := mustHex(t, nobleRecipientPublicKey)
+	privateKey := mustHex(t, vectorSeed)
+
+	for i := 0; i < 5; i++ {
+		ciphertext, sharedSecret, err := EncapsulateHybrid(publicKey)
+		if err != nil {
+			t.Fatalf("EncapsulateHybrid: %v", err)
+		}
+
+		got, err := DecapsulateHybrid(ciphertext, privateKey)
+		if err != nil {
+			t.Fatalf("DecapsulateHybrid: %v", err)
+		}
+		if !bytes.Equal(got, sharedSecret) {
+			t.Fatalf("run %d: shared secret\n got %X\nwant %X", i, got, sharedSecret)
+		}
+	}
+}
+
+func TestEncapsulateHybridRejectsMalformedInput(t *testing.T) {
+	publicKey := mustHex(t, nobleRecipientPublicKey)
+
+	if _, _, err := EncapsulateHybrid(publicKey[:hybridPublicKeyLen-1]); err == nil {
+		t.Fatal("expected an error, got nil")
+	}
+}
+
+// TestEncryptKeysHybridRoundTripsWithDecrypt covers the whole chain in the
+// encrypt direction: wrap a session key for a recipient, then recover it with
+// DecryptKeysHybrid.
+func TestEncryptKeysHybridRoundTripsWithDecrypt(t *testing.T) {
+	publicKey := mustHex(t, nobleRecipientPublicKey)
+	privateKey := mustHex(t, vectorSeed)
+	sessionKey := mustHex(t, vectorSessionKey)
+
+	encrypted, err := EncryptKeysHybrid(sessionKey, publicKey)
+	if err != nil {
+		t.Fatalf("EncryptKeysHybrid: %v", err)
+	}
+
+	got, err := DecryptKeysHybrid(HybridEncryptedKey{
+		HybridCiphertext: encrypted.HybridCiphertext,
+		EncryptedKey:     encrypted.EncryptedKey,
+	}, privateKey)
+	if err != nil {
+		t.Fatalf("DecryptKeysHybrid: %v", err)
+	}
+	if !bytes.Equal(got, sessionKey) {
+		t.Errorf("session key\n got %X\nwant %X", got, sessionKey)
+	}
+}
+
 // TestExpandHybridSeedSplit guards the sizes the wire format depends on.
 func TestExpandHybridSeedSplit(t *testing.T) {
 	mlkemSeed, x25519Secret := expandHybridSeed(mustHex(t, vectorSeed))
