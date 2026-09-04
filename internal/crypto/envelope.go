@@ -141,6 +141,19 @@ func BuildEnvelope(email Email, recipients []Recipient) (Envelope, error) {
 		return Envelope{}, errors.New("crypto: an envelope needs at least one recipient")
 	}
 
+	sessionKey, err := randomKey()
+	if err != nil {
+		return Envelope{}, fmt.Errorf("crypto: generate session key: %w", err)
+	}
+
+	if len(email.AttachmentsSessionKey) == 0 {
+		attachmentsSessionKey, err := randomKey()
+		if err != nil {
+			return Envelope{}, fmt.Errorf("crypto: generate attachments session key: %w", err)
+		}
+		email.AttachmentsSessionKey = attachmentsSessionKey
+	}
+
 	encrypted, err := EncryptEmail(email, sessionKey, nil)
 	if err != nil {
 		return Envelope{}, err
