@@ -177,6 +177,21 @@ func (s *MailService) SendEmail(ctx context.Context, raw []byte, envelopeRecipie
 	return commands.SendEmail(ctx, s.api, s.account.Token, msg, s.decryptionAccount(), s.serverPublicKey)
 }
 
+// SaveDraft stores a message a client is still writing, sealed for the
+// account alone, and returns the ID the backend gave it.
+func (s *MailService) SaveDraft(ctx context.Context, raw []byte) (string, error) {
+	msg, err := ParseOutgoingMessage(raw, nil)
+	if err != nil {
+		return "", err
+	}
+
+	draft, err := commands.SaveDraft(ctx, s.api, s.account.Token, msg, s.decryptionAccount())
+	if err != nil {
+		return "", err
+	}
+	return draft.Id, nil
+}
+
 func (s *MailService) decryptionAccount() commands.Account {
 	return commands.Account{
 		Address:    s.account.Address,

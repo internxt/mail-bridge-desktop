@@ -22,4 +22,7 @@ type Client interface {
 	LookupRecipientKeys(ctx context.Context, token string, addresses []string) ([]api.RecipientKeyDto, error)
 	SendEmail(ctx context.Context, token string, email api.SendEmailRequestDto) (api.EmailCreatedResponseDto, error)
 	GetMailAccountKeys(ctx context.Context, token string) (api.MailAccountKeysResponseDto, error)
+	SaveDraft(ctx context.Context, token string, draft api.DraftEmailRequestDto) (api.EmailResponseDto, error)
+	UpdateDraft(ctx context.Context, token, draftID string, draft api.DraftEmailRequestDto) (api.EmailResponseDto, error)
+	DiscardDraft(ctx context.Context, token, draftID string) error
 }

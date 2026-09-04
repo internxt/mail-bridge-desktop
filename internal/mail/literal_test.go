@@ -29,6 +29,8 @@ type fakeClient struct {
 	// threadCalls counts trips to the API, which is how the thread cache is
 	// checked: the saving is in not asking twice.
 	threadCalls int
+
+	savedDraft api.DraftEmailRequestDto
 }
 
 func (f *fakeClient) GetUserFolder(ctx context.Context, token string, opts api.ListEmailsOptions) (api.EmailListResponseDto, error) {
@@ -62,6 +64,23 @@ func (f *fakeClient) SendEmail(ctx context.Context, token string, email api.Send
 
 func (f *fakeClient) GetMailAccountKeys(ctx context.Context, token string) (api.MailAccountKeysResponseDto, error) {
 	return api.MailAccountKeysResponseDto{}, f.err
+}
+
+func (f *fakeClient) SaveDraft(ctx context.Context, token string, draft api.DraftEmailRequestDto) (api.EmailResponseDto, error) {
+	f.savedDraft = draft
+	if f.err != nil {
+		return api.EmailResponseDto{}, f.err
+	}
+	return api.EmailResponseDto{Id: "D1", IsDraft: true}, nil
+}
+
+func (f *fakeClient) UpdateDraft(ctx context.Context, token, draftID string, draft api.DraftEmailRequestDto) (api.EmailResponseDto, error) {
+	f.savedDraft = draft
+	return api.EmailResponseDto{Id: draftID, IsDraft: true}, f.err
+}
+
+func (f *fakeClient) DiscardDraft(ctx context.Context, token, draftID string) error {
+	return f.err
 }
 
 func encryptedEmail(t *testing.T) api.EmailResponseDto {

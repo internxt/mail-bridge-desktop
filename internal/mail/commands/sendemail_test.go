@@ -72,18 +72,24 @@ func TestSendEmailToAllInternxtRecipientsIsEncryptedAndINTERNXT(t *testing.T) {
 	}
 }
 
-// sealedBody opens what SendEmail actually sealed, so a test can assert on
-// the body that travelled rather than only on the call being made.
-func sealedBody(t *testing.T, sent api.SendEmailRequestDto, privateKeyHex, address string) crypto.Email {
+// sealedBody opens an encryption block a command actually produced, so a test
+// can assert on the body that travelled rather than only on the call being
+// made. It takes the block itself so both the send and the draft paths can
+// use it.
+func sealedBody(t *testing.T, block *api.EncryptionBlockDto, privateKeyHex, address string) crypto.Email {
 	t.Helper()
+
+	if block == nil {
+		t.Fatal("expected an encryption block, got none")
+	}
 
 	privateKey, err := hex.DecodeString(privateKeyHex)
 	if err != nil {
 		t.Fatalf("bad hex in test: %v", err)
 	}
 
-	wrappedKeys := make([]crypto.WrappedKey, 0, len(sent.Encryption.WrappedKeys))
-	for _, key := range sent.Encryption.WrappedKeys {
+	wrappedKeys := make([]crypto.WrappedKey, 0, len(block.WrappedKeys))
+	for _, key := range block.WrappedKeys {
 		wrappedKeys = append(wrappedKeys, crypto.WrappedKey{
 			EncryptedForEmail: key.EncryptedForEmail,
 			EncryptedKey:      key.EncryptedKey,
@@ -92,10 +98,10 @@ func sealedBody(t *testing.T, sent api.SendEmailRequestDto, privateKeyHex, addre
 	}
 
 	email, err := crypto.DecryptEnvelope(crypto.Envelope{
-		Version:                        sent.Encryption.Version,
-		EncryptedText:                  sent.Encryption.EncryptedText,
-		EncryptedPreview:               sent.Encryption.EncryptedPreview,
-		EncryptedAttachmentsSessionKey: sent.Encryption.EncryptedAttachmentsSessionKey,
+		Version:                        block.Version,
+		EncryptedText:                  block.EncryptedText,
+		EncryptedPreview:               block.EncryptedPreview,
+		EncryptedAttachmentsSessionKey: block.EncryptedAttachmentsSessionKey,
 		WrappedKeys:                    wrappedKeys,
 	}, privateKey, address)
 	if err != nil {
@@ -124,7 +130,7 @@ func TestSendEmailSealsTheHTMLBody(t *testing.T) {
 		t.Fatalf("SendEmail: %v", err)
 	}
 
-	body := sealedBody(t, client.sentEmail, testRecipientPrivateKeyHex, "bob@inxt.eu")
+	body := sealedBody(t, client.sentEmail.Encryption, testRecipientPrivateKeyHex, "bob@inxt.eu")
 	if body.Text != "<p>cuerpo en HTML</p>" {
 		t.Errorf("sealed body = %q, want the HTML body", body.Text)
 	}
@@ -151,7 +157,7 @@ func TestSendEmailSealsAnHTMLOnlyMessage(t *testing.T) {
 		t.Fatalf("SendEmail: %v", err)
 	}
 
-	body := sealedBody(t, client.sentEmail, testRecipientPrivateKeyHex, "bob@inxt.eu")
+	body := sealedBody(t, client.sentEmail.Encryption, testRecipientPrivateKeyHex, "bob@inxt.eu")
 	if body.Text != "<p>solo HTML</p>" {
 		t.Errorf("sealed body = %q, want the HTML body", body.Text)
 	}

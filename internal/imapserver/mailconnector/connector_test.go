@@ -27,6 +27,8 @@ type fakeMailService struct {
 	moved         []string
 	movedTo       api.Mailbox
 	deleted       []string
+	savedDraft    []byte
+	draftID       string
 
 	// What the account holds, for the sync to read.
 	mailboxes []api.MailboxResponseDto
@@ -86,6 +88,17 @@ func (f *fakeMailService) Move(ctx context.Context, emailIDs []string, mailbox a
 func (f *fakeMailService) Delete(ctx context.Context, emailIDs []string) error {
 	f.deleted = emailIDs
 	return f.writeErr
+}
+
+func (f *fakeMailService) SaveDraft(ctx context.Context, raw []byte) (string, error) {
+	f.savedDraft = raw
+	if f.writeErr != nil {
+		return "", f.writeErr
+	}
+	if f.draftID != "" {
+		return f.draftID, nil
+	}
+	return "D1", nil
 }
 
 func testConnector(service MailService) *MailConnector {

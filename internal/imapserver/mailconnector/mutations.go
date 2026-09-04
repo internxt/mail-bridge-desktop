@@ -110,6 +110,31 @@ func (c *MailConnector) DeleteMailbox(ctx context.Context, mboxID imap.MailboxID
 	return connector.ErrOperationNotAllowed
 }
 
+// CreateMessage is what a client appending a message asks for. Only drafts
+// are accepted: the API has no way to file an arbitrary message into a
+// folder, so appending anywhere else would have nowhere to put it.
+//
+// Every append to drafts stores a new one. Gluon requires it — it treats a
+// remote ID it already knows as an error here — and it matches what a client
+// does anyway: it appends the new revision and then expunges the old, which
+// arrives separately as RemoveMessagesFromMailbox.
 func (c *MailConnector) CreateMessage(ctx context.Context, mboxID imap.MailboxID, literal []byte, flags imap.FlagSet, date time.Time) (imap.Message, []byte, error) {
-	return imap.Message{}, nil, connector.ErrOperationNotAllowed
+	destination, err := c.mailboxTypeOf(mboxID)
+	if err != nil {
+		return imap.Message{}, nil, err
+	}
+	if destination != api.MailboxDrafts {
+		return imap.Message{}, nil, connector.ErrOperationNotAllowed
+	}
+
+	id, err := c.service.SaveDraft(ctx, literal)
+	if err != nil {
+		return imap.Message{}, nil, fmt.Errorf("save draft: %w", err)
+	}
+
+	return imap.Message{
+		ID:    imap.MessageID(id),
+		Flags: flags,
+		Date:  date,
+	}, literal, nil
 }
