@@ -1,14 +1,21 @@
 package smtpserver
 
 import (
+	"context"
+
 	"mail-bridge-desktop/internal/logger"
 
 	"github.com/emersion/go-smtp"
 )
 
+type Sender interface {
+	SendEmail(ctx context.Context, raw []byte, envelopeRecipients []string) error
+}
+
 type backend struct {
 	log         *logger.Logger
 	credentials Credentials
+	sender      Sender
 }
 
 // Credentials are the local mail-client credentials issued by Drive Desktop.
@@ -18,11 +25,11 @@ type Credentials struct {
 	Password string
 }
 
-// session implements smtp.Session and smtp.AuthSession. For now it only logs
-// the dialogue: there is nowhere to deliver the mail yet.
+// session implements smtp.Session and smtp.AuthSession.
 type session struct {
 	log         *logger.Logger
 	credentials Credentials
+	sender      Sender
 	from        string
 	to          []string
 }

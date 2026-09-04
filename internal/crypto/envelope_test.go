@@ -189,6 +189,30 @@ func TestBuildEnvelopeRoundTripsWithDecryptEnvelope(t *testing.T) {
 	}
 }
 
+// TestBuildEnvelopeAlwaysSealsAnAttachmentsSessionKey guards what the server
+// requires: it decrypts body, preview and attachments key together, so an
+// empty one fails the whole envelope and every wrapped key looks unusable.
+func TestBuildEnvelopeAlwaysSealsAnAttachmentsSessionKey(t *testing.T) {
+	envelope, err := BuildEnvelope(Email{Text: "hola", Preview: "hola"}, []Recipient{
+		{Address: aliceAddress, PublicKey: mustHex(t, buildAlicePublicKey)},
+	})
+	if err != nil {
+		t.Fatalf("BuildEnvelope: %v", err)
+	}
+
+	if envelope.EncryptedAttachmentsSessionKey == "" {
+		t.Fatal("an email without attachments still has to seal an attachments session key")
+	}
+
+	email, err := DecryptEnvelope(envelope, mustHex(t, buildAliceSeed), aliceAddress)
+	if err != nil {
+		t.Fatalf("DecryptEnvelope: %v", err)
+	}
+	if len(email.AttachmentsSessionKey) != sessionKeyLen {
+		t.Errorf("attachments session key is %d bytes, want %d", len(email.AttachmentsSessionKey), sessionKeyLen)
+	}
+}
+
 func TestBuildEnvelopeRejectsNoRecipients(t *testing.T) {
 	if _, err := BuildEnvelope(Email{Text: "hola"}, nil); err == nil {
 		t.Fatal("expected an error, got nil")

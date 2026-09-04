@@ -1,6 +1,6 @@
 // Package smtpserver runs a local SMTP listener for desktop mail clients to
-// submit outgoing mail to. It authenticates the client and accepts
-// submissions; it does not yet send them anywhere.
+// submit outgoing mail to. It authenticates the client, then hands each
+// message to a Sender for delivery.
 package smtpserver
 
 import (
@@ -27,11 +27,14 @@ const (
 )
 
 // New builds the SMTP service. The credentials are the local ones the parent
-// issued for this account, the same pair the IMAP side accepts.
-func New(cfg config.Config, credentials Credentials) *Service {
+// issued for this account, the same pair the IMAP side accepts. sender is
+// nil-able: a nil sender still authenticates a client, but Data reports an
+// error instead of submitting anything, so a client sees why nothing sent
+// rather than a message that silently vanishes.
+func New(cfg config.Config, credentials Credentials, sender Sender) *Service {
 	log := logger.New("smtp")
 
-	srv := smtp.NewServer(&backend{log: log, credentials: credentials})
+	srv := smtp.NewServer(&backend{log: log, credentials: credentials, sender: sender})
 	srv.Addr = cfg.SMTPAddr
 	srv.Domain = cfg.SMTPDomain
 	// Cleartext credentials: only acceptable because we listen on loopback.
@@ -49,7 +52,7 @@ func New(cfg config.Config, credentials Credentials) *Service {
 
 func (b *backend) NewSession(c *smtp.Conn) (smtp.Session, error) {
 	b.log.Info("connection from %v", c.Conn().RemoteAddr())
-	return &session{log: b.log, credentials: b.credentials}, nil
+	return &session{log: b.log, credentials: b.credentials, sender: b.sender}, nil
 }
 
 func (s *session) AuthMechanisms() []string { return []string{sasl.Plain} }
@@ -88,12 +91,22 @@ func (s *session) Rcpt(to string, opts *smtp.RcptOptions) error {
 }
 
 func (s *session) Data(r io.Reader) error {
-	// TODO: hand off to internal/api. Discarded until the connector exists.
-	n, err := io.Copy(io.Discard, r)
+	raw, err := io.ReadAll(r)
 	if err != nil {
 		return err
 	}
-	s.log.Info("data from %s to %v: %d bytes (discarded)", s.from, s.to, n)
+
+	if s.sender == nil {
+		s.log.Warn("data from %s to %v: %d bytes, dropped (no mail service available)", s.from, s.to, len(raw))
+		return errors.New("mail service unavailable")
+	}
+
+	if err := s.sender.SendEmail(context.Background(), raw, s.to); err != nil {
+		s.log.Warn("send from %s to %v failed: %v", s.from, s.to, err)
+		return fmt.Errorf("send: %w", err)
+	}
+
+	s.log.Info("sent %d bytes from %s to %v", len(raw), s.from, s.to)
 	return nil
 }
 

@@ -19,4 +19,7 @@ type Client interface {
 	GetThread(ctx context.Context, token, threadID string) ([]api.EmailResponseDto, error)
 	UpdateEmail(ctx context.Context, token, emailID string, update api.UpdateEmailRequestDto) error
 	DeleteEmail(ctx context.Context, token, emailID string) error
+	LookupRecipientKeys(ctx context.Context, token string, addresses []string) ([]api.RecipientKeyDto, error)
+	SendEmail(ctx context.Context, token string, email api.SendEmailRequestDto) (api.EmailCreatedResponseDto, error)
+	GetMailAccountKeys(ctx context.Context, token string) (api.MailAccountKeysResponseDto, error)
 }

@@ -124,6 +124,14 @@ func DecryptEnvelope(envelope Envelope, privateKey []byte, address string) (Emai
 	return DecryptEmail(encrypted, sessionKey, nil)
 }
 
+func randomKey() ([]byte, error) {
+	key := make([]byte, sessionKeyLen)
+	if _, err := rand.Read(key); err != nil {
+		return nil, err
+	}
+	return key, nil
+}
+
 // BuildEnvelope encrypts an email once under a fresh random session key and
 // wraps that key for every recipient. The sender's own address must be among
 // recipients so they can read their own Sent copy — this package does not add
@@ -131,11 +139,6 @@ func DecryptEnvelope(envelope Envelope, privateKey []byte, address string) (Emai
 func BuildEnvelope(email Email, recipients []Recipient) (Envelope, error) {
 	if len(recipients) == 0 {
 		return Envelope{}, errors.New("crypto: an envelope needs at least one recipient")
-	}
-
-	sessionKey := make([]byte, sessionKeyLen)
-	if _, err := rand.Read(sessionKey); err != nil {
-		return Envelope{}, fmt.Errorf("crypto: generate session key: %w", err)
 	}
 
 	encrypted, err := EncryptEmail(email, sessionKey, nil)

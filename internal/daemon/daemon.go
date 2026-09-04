@@ -41,13 +41,19 @@ func Run(ctx context.Context, options Options) error {
 		return err
 	}
 
-	imapService, err := startIMAP(ctx, options, session)
+	log := logger.New("mail")
+	service, serviceErr := mailService(ctx, options, session, log)
+	if serviceErr != nil {
+		log.Warn("serving fixture mail: %v", serviceErr)
+	}
+
+	imapService, err := startIMAP(ctx, options, session, service)
 	if err != nil {
 		_ = controlClient.SendError("", "start_imap")
 		return err
 	}
 
-	smtpService, err := startSMTP(options, session)
+	smtpService, err := startSMTP(options, session, senderOrNil(service))
 	if err != nil {
 		_ = imapService.Close(context.Background())
 		_ = controlClient.SendError("", "start_smtp")
@@ -71,13 +77,13 @@ func Run(ctx context.Context, options Options) error {
 	return shutdownServices(imapService, smtpService)
 }
 
-func startIMAP(ctx context.Context, options Options, session control.Session) (*imapserver.IMAPServer, error) {
+func startIMAP(ctx context.Context, options Options, session control.Session, service *mail.MailService) (*imapserver.IMAPServer, error) {
 	passphrase, err := storagePassphrase(options.StateDir)
 	if err != nil {
 		return nil, fmt.Errorf("start IMAP: %w", err)
 	}
 
-	service, err := imapserver.Start(ctx, imapserver.UnlockedSession{
+	imapService, err := imapserver.Start(ctx, imapserver.UnlockedSession{
 		AccountID: session.AccountID,
 		Addresses: session.Addresses,
 	}, imapserver.Config{
@@ -88,24 +94,20 @@ func startIMAP(ctx context.Context, options Options, session control.Session) (*
 			Password: session.MailClient.Password,
 		},
 		StoragePassphrase: passphrase,
-		ConnectorFactory:  connectorFactory(options, session),
+		ConnectorFactory:  connectorFactory(service),
 		LogProtocol:       options.Config.LogImapProtocol,
 		PollInterval:      mailconnector.DefaultPollInterval,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("start IMAP: %w", err)
 	}
-	return service, nil
+	return imapService, nil
 }
 
 // connectorFactory serves the account's own mail, falling back to a fixture
 // mailbox when the Mail API is not reachable.
-func connectorFactory(options Options, session control.Session) imapserver.ConnectorFactory {
-	log := logger.New("mail")
-
-	service, err := mailService(options, session, log)
-	if err != nil {
-		log.Warn("serving fixture mail: %v", err)
+func connectorFactory(service *mail.MailService) imapserver.ConnectorFactory {
+	if service == nil {
 		return imapserver.NewDevelopmentConnectorFactory([][]byte{
 			[]byte("From: welcome@example.test\r\nTo: user@example.test\r\nSubject: Mail Bridge development server\r\n\r\nThe IMAP server is serving this local fixture message.\r\n"),
 		})
@@ -117,12 +119,13 @@ func connectorFactory(options Options, session control.Session) imapserver.Conne
 	}
 }
 
-// mailService builds the service that reads the account's mail, from the
-// session the parent sent.
+// mailService builds the service that reads and sends the account's mail,
+// from the session the parent sent. Its own public key is fetched once here,
+// so sending mail later needs no extra round trip for it.
 //
 // Nothing here is read from disk: the token and the keys live as long as the
 // session does, which is what makes signing out a matter of closing it.
-func mailService(options Options, session control.Session, log *logger.Logger) (mailconnector.MailService, error) {
+func mailService(ctx context.Context, options Options, session control.Session, log *logger.Logger) (*mail.MailService, error) {
 	backend, err := session.Backend()
 	if err != nil {
 		return nil, err
@@ -136,11 +139,17 @@ func mailService(options Options, session control.Session, log *logger.Logger) (
 		return nil, err
 	}
 
-	return mail.New(client, mail.Account{
+	service := mail.New(client, mail.Account{
 		Token:      backend.Token,
 		Address:    session.Addresses[0],
 		PrivateKey: encryptionKey(backend.EncryptionPrivateKey, log),
-	}, log), nil
+	}, options.Config.ServerPublicKey, log)
+
+	if err := service.Init(ctx); err != nil {
+		log.Warn("sending mail will not be readable in Sent: %v", err)
+	}
+
+	return service, nil
 }
 
 const privateKeyLen = 32
@@ -174,11 +183,18 @@ func storagePassphrase(stateDir string) ([]byte, error) {
 	return imapserver.EnsureStoragePassphrase(credentials)
 }
 
-func startSMTP(options Options, session control.Session) (*smtpserver.Service, error) {
+func senderOrNil(service *mail.MailService) smtpserver.Sender {
+	if service == nil {
+		return nil
+	}
+	return service
+}
+
+func startSMTP(options Options, session control.Session, sender smtpserver.Sender) (*smtpserver.Service, error) {
 	service := smtpserver.New(options.Config, smtpserver.Credentials{
 		Username: session.MailClient.Username,
 		Password: session.MailClient.Password,
-	})
+	}, sender)
 	if err := service.Start(); err != nil {
 		return nil, fmt.Errorf("start SMTP: %w", err)
 	}

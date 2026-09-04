@@ -17,6 +17,15 @@ type fakeClient struct {
 	updated    []string
 	lastUpdate api.UpdateEmailRequestDto
 	deleted    []string
+
+	// What SendEmail's collaborators return, and what it asked of them.
+	recipientKeys      []api.RecipientKeyDto
+	lookupErr          error
+	sendErr            error
+	sentEmail          api.SendEmailRequestDto
+	sendCalled         bool
+	mailAccountKeys    api.MailAccountKeysResponseDto
+	mailAccountKeysErr error
 }
 
 func (f *fakeClient) GetUserFolder(ctx context.Context, token string, opts api.ListEmailsOptions) (api.EmailListResponseDto, error) {
@@ -40,6 +49,23 @@ func (f *fakeClient) UpdateEmail(ctx context.Context, token, emailID string, upd
 func (f *fakeClient) DeleteEmail(ctx context.Context, token, emailID string) error {
 	f.deleted = append(f.deleted, emailID)
 	return f.err
+}
+
+func (f *fakeClient) LookupRecipientKeys(ctx context.Context, token string, addresses []string) ([]api.RecipientKeyDto, error) {
+	return f.recipientKeys, f.lookupErr
+}
+
+func (f *fakeClient) SendEmail(ctx context.Context, token string, email api.SendEmailRequestDto) (api.EmailCreatedResponseDto, error) {
+	f.sendCalled = true
+	f.sentEmail = email
+	if f.sendErr != nil {
+		return api.EmailCreatedResponseDto{}, f.sendErr
+	}
+	return api.EmailCreatedResponseDto{Id: "M1"}, nil
+}
+
+func (f *fakeClient) GetMailAccountKeys(ctx context.Context, token string) (api.MailAccountKeysResponseDto, error) {
+	return f.mailAccountKeys, f.mailAccountKeysErr
 }
 
 func TestGetEmailPicksItOutOfTheThread(t *testing.T) {
