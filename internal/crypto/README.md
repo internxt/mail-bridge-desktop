@@ -205,10 +205,20 @@ is sensitive.
 | File           | What it holds                                                                              |
 | -------------- | ------------------------------------------------------------------------------------------- |
 | `core.go`      | Package doc, plus the JS reference implementation kept verbatim in a comment                |
-| `symmetric.go` | `DecryptSymmetrically`/`EncryptSymmetrically` (AES-GCM), `UnwrapKey`/`WrapKey` (AES-KW)      |
-| `hybrid.go`    | `DecapsulateHybrid`/`EncapsulateHybrid`, `DecryptKeysHybrid`/`EncryptKeysHybrid` (X-Wing)    |
+| `symmetric.go` | `aesGCM` (unexported), and the package-level `DecryptSymmetrically`/`EncryptSymmetrically` that wrap it |
+| `keywrap.go`   | `aesKeyWrap` (unexported, RFC 3394), and the package-level `UnwrapKey`/`WrapKey` that wrap it |
+| `hybrid.go`    | `xwingKEM` (unexported), and the package-level `DecapsulateHybrid`/`EncapsulateHybrid`/`DecryptKeysHybrid`/`EncryptKeysHybrid` that wrap it |
 | `email.go`     | `DecryptEmail`/`EncryptEmail` — the three ciphertexts under one session key                  |
 | `envelope.go`  | `IsEncryptedBody`, `ParseEnvelope`, `DecryptEnvelope`, `BuildEnvelope`                       |
+
+Each algorithm — AES-GCM, AES Key Wrap, X-Wing — is its own unexported type,
+holding only what that algorithm needs and exposing only the operation it
+performs (`Seal`/`Open`, `Wrap`/`Unwrap`, `Encapsulate`/`Decapsulate`). The
+package-level functions above are thin wrappers kept for the rest of the
+codebase to call; nothing outside this package constructs these types
+directly. The point of the split: moving one of these algorithms to a package
+of its own, if that is ever needed, is moving its file — the boundary is
+already there.
 
 ## If you change something here
 
