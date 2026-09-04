@@ -84,18 +84,20 @@ func (c *MailConnector) AddMessagesToMailbox(ctx context.Context, ids []imap.Mes
 
 // RemoveMessagesFromMailbox takes mail out of a folder, which is what a client
 // expunging deleted messages asks for.
-//
-// Removing from the trash is the one that really deletes: an email has to live
-// somewhere, so anywhere else this moves it to the trash instead.
+
 func (c *MailConnector) RemoveMessagesFromMailbox(ctx context.Context, ids []imap.MessageID, mboxID imap.MailboxID) error {
 	from, err := c.mailboxTypeOf(mboxID)
 	if err != nil {
 		return err
 	}
-	if from == api.MailboxTrash {
+	switch from {
+	case api.MailboxDrafts:
+		return c.service.DiscardDrafts(ctx, emailIDs(ids))
+	case api.MailboxTrash:
 		return c.service.Delete(ctx, emailIDs(ids))
+	default:
+		return c.service.Move(ctx, emailIDs(ids), api.MailboxTrash)
 	}
-	return c.service.Move(ctx, emailIDs(ids), api.MailboxTrash)
 }
 
 func (c *MailConnector) CreateMailbox(ctx context.Context, name []string) (imap.Mailbox, error) {
@@ -110,31 +112,40 @@ func (c *MailConnector) DeleteMailbox(ctx context.Context, mboxID imap.MailboxID
 	return connector.ErrOperationNotAllowed
 }
 
-// CreateMessage is what a client appending a message asks for. Only drafts
-// are accepted: the API has no way to file an arbitrary message into a
-// folder, so appending anywhere else would have nowhere to put it.
+// CreateMessage is what a client appending a message asks for.
 //
-// Every append to drafts stores a new one. Gluon requires it — it treats a
-// remote ID it already knows as an error here — and it matches what a client
-// does anyway: it appends the new revision and then expunges the old, which
-// arrives separately as RemoveMessagesFromMailbox.
+// Drafts are stored. Every append to drafts stores a new one: Gluon requires
+// it — it treats a remote ID it already knows as an error here — and it
+// matches what a client does anyway, appending the new revision and then
+// expunging the old, which arrives separately as RemoveMessagesFromMailbox.
 func (c *MailConnector) CreateMessage(ctx context.Context, mboxID imap.MailboxID, literal []byte, flags imap.FlagSet, date time.Time) (imap.Message, []byte, error) {
 	destination, err := c.mailboxTypeOf(mboxID)
 	if err != nil {
 		return imap.Message{}, nil, err
 	}
-	if destination != api.MailboxDrafts {
+
+	switch destination {
+	case api.MailboxDrafts:
+		id, err := c.service.SaveDraft(ctx, literal)
+		if err != nil {
+			return imap.Message{}, nil, fmt.Errorf("save draft: %w", err)
+		}
+		return imap.Message{ID: imap.MessageID(id), Flags: flags, Date: date}, literal, nil
+
+	case api.MailboxSent:
+		id := discardedMessageID()
+		c.updates <- imap.NewMessagesDeleted(id)
+		c.log.Info("dropped a sent copy the backend already stores")
+		return imap.Message{ID: id, Flags: flags, Date: date}, literal, nil
+
+	default:
 		return imap.Message{}, nil, connector.ErrOperationNotAllowed
 	}
+}
 
-	id, err := c.service.SaveDraft(ctx, literal)
-	if err != nil {
-		return imap.Message{}, nil, fmt.Errorf("save draft: %w", err)
-	}
-
-	return imap.Message{
-		ID:    imap.MessageID(id),
-		Flags: flags,
-		Date:  date,
-	}, literal, nil
+// discardedMessageID names a message that was accepted but not stored. It has
+// to be unique, since Gluon rejects an append that comes back with an ID it
+// already knows, and it must never collide with an ID the API could give out.
+func discardedMessageID() imap.MessageID {
+	return imap.MessageID(fmt.Sprintf("bridge-discarded-%d", time.Now().UnixNano()))
 }

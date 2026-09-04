@@ -35,6 +35,15 @@ func SaveDraft(ctx context.Context, client Client, token string, msg OutgoingMes
 	return draft, nil
 }
 
+func DiscardDrafts(ctx context.Context, client Client, token string, draftIDs []string) error {
+	for _, draftID := range draftIDs {
+		if err := client.DiscardDraft(ctx, token, draftID); err != nil {
+			return fmt.Errorf("discard draft %s: %w", draftID, err)
+		}
+	}
+	return nil
+}
+
 func optionalString(value string) *string {
 	if value == "" {
 		return nil

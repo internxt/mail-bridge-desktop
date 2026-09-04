@@ -192,6 +192,12 @@ func (s *MailService) SaveDraft(ctx context.Context, raw []byte) (string, error)
 	return draft.Id, nil
 }
 
+// DiscardDrafts destroys drafts for good, rather than moving them to the
+// trash the way deleting an ordinary email does.
+func (s *MailService) DiscardDrafts(ctx context.Context, draftIDs []string) error {
+	return commands.DiscardDrafts(ctx, s.api, s.account.Token, draftIDs)
+}
+
 func (s *MailService) decryptionAccount() commands.Account {
 	return commands.Account{
 		Address:    s.account.Address,

@@ -20,15 +20,16 @@ type fakeMailService struct {
 
 	// What the connector asked of the service, so a test can check the
 	// operation reached it rather than only that no error came back.
-	writeErr      error
-	markedRead    []string
-	readValue     bool
-	markedFlagged []string
-	moved         []string
-	movedTo       api.Mailbox
-	deleted       []string
-	savedDraft    []byte
-	draftID       string
+	writeErr        error
+	markedRead      []string
+	readValue       bool
+	markedFlagged   []string
+	moved           []string
+	movedTo         api.Mailbox
+	deleted         []string
+	savedDraft      []byte
+	draftID         string
+	discardedDrafts []string
 
 	// What the account holds, for the sync to read.
 	mailboxes []api.MailboxResponseDto
@@ -87,6 +88,11 @@ func (f *fakeMailService) Move(ctx context.Context, emailIDs []string, mailbox a
 
 func (f *fakeMailService) Delete(ctx context.Context, emailIDs []string) error {
 	f.deleted = emailIDs
+	return f.writeErr
+}
+
+func (f *fakeMailService) DiscardDrafts(ctx context.Context, draftIDs []string) error {
+	f.discardedDrafts = draftIDs
 	return f.writeErr
 }
 

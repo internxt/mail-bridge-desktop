@@ -74,11 +74,6 @@ func (f *fakeClient) SaveDraft(ctx context.Context, token string, draft api.Draf
 	return api.EmailResponseDto{Id: "D1", IsDraft: true}, nil
 }
 
-func (f *fakeClient) UpdateDraft(ctx context.Context, token, draftID string, draft api.DraftEmailRequestDto) (api.EmailResponseDto, error) {
-	f.savedDraft = draft
-	return api.EmailResponseDto{Id: draftID, IsDraft: true}, f.err
-}
-
 func (f *fakeClient) DiscardDraft(ctx context.Context, token, draftID string) error {
 	return f.err
 }
