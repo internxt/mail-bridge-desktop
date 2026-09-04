@@ -23,6 +23,7 @@ type MailService interface {
 	MarkFlagged(ctx context.Context, emailIDs []string, flagged bool) error
 	Move(ctx context.Context, emailIDs []string, mailbox api.Mailbox) error
 	Delete(ctx context.Context, emailIDs []string) error
+	SaveDraft(ctx context.Context, raw []byte) (string, error)
 }
 
 // MailConnector is the Gluon connector.Connector implementation that serves

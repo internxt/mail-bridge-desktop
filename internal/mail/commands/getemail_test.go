@@ -26,6 +26,12 @@ type fakeClient struct {
 	sendCalled         bool
 	mailAccountKeys    api.MailAccountKeysResponseDto
 	mailAccountKeysErr error
+
+	// What the draft commands asked for.
+	savedDraft      api.DraftEmailRequestDto
+	saveDraftErr    error
+	saveDraftCalled bool
+	discardedDraft  string
 }
 
 func (f *fakeClient) GetUserFolder(ctx context.Context, token string, opts api.ListEmailsOptions) (api.EmailListResponseDto, error) {
@@ -66,6 +72,28 @@ func (f *fakeClient) SendEmail(ctx context.Context, token string, email api.Send
 
 func (f *fakeClient) GetMailAccountKeys(ctx context.Context, token string) (api.MailAccountKeysResponseDto, error) {
 	return f.mailAccountKeys, f.mailAccountKeysErr
+}
+
+func (f *fakeClient) SaveDraft(ctx context.Context, token string, draft api.DraftEmailRequestDto) (api.EmailResponseDto, error) {
+	f.saveDraftCalled = true
+	f.savedDraft = draft
+	if f.saveDraftErr != nil {
+		return api.EmailResponseDto{}, f.saveDraftErr
+	}
+	return api.EmailResponseDto{Id: "D1", IsDraft: true}, nil
+}
+
+func (f *fakeClient) UpdateDraft(ctx context.Context, token, draftID string, draft api.DraftEmailRequestDto) (api.EmailResponseDto, error) {
+	f.savedDraft = draft
+	if f.saveDraftErr != nil {
+		return api.EmailResponseDto{}, f.saveDraftErr
+	}
+	return api.EmailResponseDto{Id: draftID, IsDraft: true}, nil
+}
+
+func (f *fakeClient) DiscardDraft(ctx context.Context, token, draftID string) error {
+	f.discardedDraft = draftID
+	return f.err
 }
 
 func TestGetEmailPicksItOutOfTheThread(t *testing.T) {

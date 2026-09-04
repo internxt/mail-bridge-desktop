@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/ProtonMail/gluon/connector"
 	"github.com/ProtonMail/gluon/imap"
@@ -14,14 +15,16 @@ import (
 // inboxID and trashID are the IDs the API gives those folders; the connector
 // learns which is which while syncing.
 const (
-	inboxID = imap.MailboxID("a")
-	trashID = imap.MailboxID("b")
+	inboxID  = imap.MailboxID("a")
+	trashID  = imap.MailboxID("b")
+	draftsID = imap.MailboxID("c")
 )
 
 func connectorWithMailboxes(service MailService) *MailConnector {
 	c := testConnector(service)
 	c.rememberMailboxType(api.MailboxResponseDto{Id: string(inboxID), Type: mailboxTypePtr(api.MailboxInbox)})
 	c.rememberMailboxType(api.MailboxResponseDto{Id: string(trashID), Type: mailboxTypePtr(api.MailboxTrash)})
+	c.rememberMailboxType(api.MailboxResponseDto{Id: string(draftsID), Type: mailboxTypePtr(api.MailboxDrafts)})
 	return c
 }
 
@@ -133,6 +136,65 @@ func TestMutationsReportFailure(t *testing.T) {
 	}
 	if _, err := c.MoveMessages(context.Background(), []imap.MessageID{"M1"}, inboxID, trashID); err == nil {
 		t.Error("MoveMessages should report the failure")
+	}
+}
+
+// TestCreateMessageInDraftsSavesADraft is the append a client makes every time
+// it autosaves what is being written.
+func TestCreateMessageInDraftsSavesADraft(t *testing.T) {
+	service := &fakeMailService{draftID: "D7"}
+	c := connectorWithMailboxes(service)
+
+	literal := []byte("Subject: a medias\r\n\r\nlo termino luego\r\n")
+	flags := imap.NewFlagSet(imap.FlagSeen, imap.FlagDraft)
+	date := time.Date(2025, 6, 15, 10, 30, 0, 0, time.UTC)
+
+	message, returned, err := c.CreateMessage(context.Background(), draftsID, literal, flags, date)
+	if err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+
+	if string(service.savedDraft) != string(literal) {
+		t.Errorf("saved %q, want the literal as it arrived", service.savedDraft)
+	}
+	// The ID has to be the one the API just assigned: Gluon rejects an append
+	// to drafts that comes back with a remote ID it already knows.
+	if message.ID != imap.MessageID("D7") {
+		t.Errorf("message id = %q, want D7", message.ID)
+	}
+	if !message.Flags.Contains(imap.FlagDraft) {
+		t.Error("the flags the client sent should come back")
+	}
+	if !message.Date.Equal(date) {
+		t.Errorf("date = %v, want %v", message.Date, date)
+	}
+	if string(returned) != string(literal) {
+		t.Error("the literal should go back untouched")
+	}
+}
+
+// TestCreateMessageOutsideDraftsIsRefused covers the append a client makes to
+// Sent after delivering: the API has no way to file a message into a folder,
+// so it is refused rather than silently dropped.
+func TestCreateMessageOutsideDraftsIsRefused(t *testing.T) {
+	service := &fakeMailService{}
+	c := connectorWithMailboxes(service)
+
+	_, _, err := c.CreateMessage(context.Background(), inboxID, []byte("x"), imap.NewFlagSet(), time.Now())
+	if !errors.Is(err, connector.ErrOperationNotAllowed) {
+		t.Errorf("CreateMessage: got %v, want ErrOperationNotAllowed", err)
+	}
+	if service.savedDraft != nil {
+		t.Error("nothing should have been saved")
+	}
+}
+
+func TestCreateMessageReportsAFailedSave(t *testing.T) {
+	service := &fakeMailService{writeErr: errors.New("api is down")}
+	c := connectorWithMailboxes(service)
+
+	if _, _, err := c.CreateMessage(context.Background(), draftsID, []byte("x"), imap.NewFlagSet(), time.Now()); err == nil {
+		t.Fatal("expected the failure to reach the client")
 	}
 }
 

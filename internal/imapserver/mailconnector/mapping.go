@@ -55,7 +55,7 @@ func mailboxType(mailbox api.MailboxResponseDto) api.Mailbox {
 }
 
 func defaultPermanentFlags() imap.FlagSet {
-	return imap.NewFlagSet(imap.FlagSeen, imap.FlagFlagged, imap.FlagDeleted, imap.FlagAnswered)
+	return imap.NewFlagSet(imap.FlagSeen, imap.FlagFlagged, imap.FlagDeleted, imap.FlagAnswered, imap.FlagDraft)
 }
 
 // toIMAPMessage describes one message to Gluon.
