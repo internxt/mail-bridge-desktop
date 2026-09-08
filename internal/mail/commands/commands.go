@@ -24,4 +24,6 @@ type Client interface {
 	GetMailAccountKeys(ctx context.Context, token string) (api.MailAccountKeysResponseDto, error)
 	SaveDraft(ctx context.Context, token string, draft api.DraftEmailRequestDto) (api.EmailResponseDto, error)
 	DiscardDraft(ctx context.Context, token, draftID string) error
+	DownloadAttachment(ctx context.Context, token, emailID, blobID string) ([]byte, error)
+	UploadAttachment(ctx context.Context, token, name, contentType string, content []byte) (api.UploadAttachmentResponseDto, error)
 }

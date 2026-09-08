@@ -21,12 +21,13 @@ const (
 )
 
 type request struct {
-	svc    *service
-	method string
-	path   string
-	query  url.Values
-	token  string
-	body   any
+	svc         *service
+	method      string
+	path        string
+	query       url.Values
+	token       string
+	body        any
+	contentType string
 }
 
 // Performs the request using `doRaw` and unmarshals the response into `out`.
@@ -50,10 +51,14 @@ func (c *Client) doRaw(ctx context.Context, req request) ([]byte, error) {
 	// again, and an io.Reader cannot be replayed once consumed.
 	var payload []byte
 	if req.body != nil {
-		var err error
-		payload, err = json.Marshal(req.body)
-		if err != nil {
-			return nil, fmt.Errorf("api: encode request: %w", err)
+		if raw, alreadyEncoded := req.body.([]byte); alreadyEncoded {
+			payload = raw
+		} else {
+			var err error
+			payload, err = json.Marshal(req.body)
+			if err != nil {
+				return nil, fmt.Errorf("api: encode request: %w", err)
+			}
 		}
 	}
 
@@ -99,7 +104,7 @@ func (c *Client) attempt(ctx context.Context, req request, endpoint string, payl
 	}
 
 	httpReq.Header = req.svc.headers()
-	injectHeaders(httpReq.Header, userToken, payload)
+	injectHeaders(httpReq.Header, userToken, payload, req.contentType)
 
 	resp, err := c.http.Do(httpReq)
 	if err != nil {
@@ -125,13 +130,17 @@ func (c *Client) attempt(ctx context.Context, req request, endpoint string, payl
 	return body, resp.StatusCode, nil
 }
 
-func injectHeaders(header http.Header, token string, payload []byte) {
+func injectHeaders(header http.Header, token string, payload []byte, contentType string) {
 	if token != "" {
 		header.Set("Authorization", "Bearer "+token)
 	}
-	if payload != nil {
-		header.Set("Content-Type", "application/json; charset=utf-8")
+	if payload == nil {
+		return
 	}
+	if contentType == "" {
+		contentType = "application/json; charset=utf-8"
+	}
+	header.Set("Content-Type", contentType)
 }
 
 func backoffFor(attempt int, lastErr error) time.Duration {

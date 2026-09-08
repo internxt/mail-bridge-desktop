@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"mail-bridge-desktop/internal/api"
@@ -32,6 +33,23 @@ type fakeClient struct {
 	saveDraftErr    error
 	saveDraftCalled bool
 	discardedDraft  string
+
+	// What the attachment downloads returned, and which were asked for.
+	blobs           map[string][]byte
+	downloadedBlobs []string
+	downloadErr     error
+
+	// What was uploaded, so a test can check the bytes that travelled.
+	uploaded  []uploadedAttachment
+	uploadErr error
+}
+
+// uploadedAttachment is one call to UploadAttachment, kept whole so a test can
+// assert the file was sealed before it left.
+type uploadedAttachment struct {
+	name        string
+	contentType string
+	content     []byte
 }
 
 func (f *fakeClient) GetUserFolder(ctx context.Context, token string, opts api.ListEmailsOptions) (api.EmailListResponseDto, error) {
@@ -86,6 +104,27 @@ func (f *fakeClient) SaveDraft(ctx context.Context, token string, draft api.Draf
 func (f *fakeClient) DiscardDraft(ctx context.Context, token, draftID string) error {
 	f.discardedDraft = draftID
 	return f.err
+}
+
+func (f *fakeClient) UploadAttachment(ctx context.Context, token, name, contentType string, content []byte) (api.UploadAttachmentResponseDto, error) {
+	if f.uploadErr != nil {
+		return api.UploadAttachmentResponseDto{}, f.uploadErr
+	}
+	f.uploaded = append(f.uploaded, uploadedAttachment{name: name, contentType: contentType, content: content})
+	return api.UploadAttachmentResponseDto{
+		BlobId: fmt.Sprintf("B%d", len(f.uploaded)),
+		Name:   name,
+		Size:   float32(len(content)),
+		Type:   contentType,
+	}, nil
+}
+
+func (f *fakeClient) DownloadAttachment(ctx context.Context, token, emailID, blobID string) ([]byte, error) {
+	f.downloadedBlobs = append(f.downloadedBlobs, blobID)
+	if f.downloadErr != nil {
+		return nil, f.downloadErr
+	}
+	return f.blobs[blobID], nil
 }
 
 func TestGetEmailPicksItOutOfTheThread(t *testing.T) {

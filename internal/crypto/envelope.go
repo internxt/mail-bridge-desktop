@@ -132,6 +132,15 @@ func randomKey() ([]byte, error) {
 	return key, nil
 }
 
+// NewSessionKey returns a fresh symmetric key.
+func NewSessionKey() ([]byte, error) {
+	key, err := randomKey()
+	if err != nil {
+		return nil, fmt.Errorf("crypto: generate session key: %w", err)
+	}
+	return key, nil
+}
+
 // BuildEnvelope encrypts an email once under a fresh random session key and
 // wraps that key for every recipient. The sender's own address must be among
 // recipients so they can read their own Sent copy — this package does not add
