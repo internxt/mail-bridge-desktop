@@ -21,8 +21,10 @@ type Client interface {
 	DeleteEmail(ctx context.Context, token, emailID string) error
 	LookupRecipientKeys(ctx context.Context, token string, addresses []string) ([]api.RecipientKeyDto, error)
 	SendEmail(ctx context.Context, token string, email api.SendEmailRequestDto) (api.EmailCreatedResponseDto, error)
+	ReplyEmail(ctx context.Context, token, emailID string, reply api.ReplyEmailRequestDto) (api.EmailCreatedResponseDto, error)
 	GetMailAccountKeys(ctx context.Context, token string) (api.MailAccountKeysResponseDto, error)
 	SaveDraft(ctx context.Context, token string, draft api.DraftEmailRequestDto) (api.EmailResponseDto, error)
-	UpdateDraft(ctx context.Context, token, draftID string, draft api.DraftEmailRequestDto) (api.EmailResponseDto, error)
 	DiscardDraft(ctx context.Context, token, draftID string) error
+	DownloadAttachment(ctx context.Context, token, emailID, blobID string) ([]byte, error)
+	UploadAttachment(ctx context.Context, token, name, contentType string, content []byte) (api.UploadAttachmentResponseDto, error)
 }

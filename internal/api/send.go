@@ -43,6 +43,22 @@ func (c *Client) SendEmail(ctx context.Context, token string, email SendEmailReq
 	return res, err
 }
 
+// ReplyEmail sends an email as a reply to another, so it joins that
+// conversation instead of starting one.
+func (c *Client) ReplyEmail(ctx context.Context, token, emailID string, reply ReplyEmailRequestDto) (EmailCreatedResponseDto, error) {
+	var res EmailCreatedResponseDto
+
+	err := c.do(ctx, request{
+		svc:    c.mail,
+		method: http.MethodPost,
+		path:   emailPath + "/" + escapeID(emailID) + "/reply",
+		token:  token,
+		body:   reply,
+	}, &res)
+
+	return res, err
+}
+
 // GetMailAccountKeys returns the caller's own encryption keys, including the
 // public key a sender seals their own Sent copy with.
 func (c *Client) GetMailAccountKeys(ctx context.Context, token string) (MailAccountKeysResponseDto, error) {

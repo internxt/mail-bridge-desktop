@@ -12,12 +12,21 @@ import (
 
 // OutgoingMessage is a composed email, ready to send.
 type OutgoingMessage struct {
-	Subject  string
-	HTMLBody string
-	TextBody string
-	To       []api.EmailAddressDto
-	Cc       []api.EmailAddressDto
-	Bcc      []api.EmailAddressDto
+	Subject          string
+	HTMLBody         string
+	TextBody         string
+	Attachments      []OutgoingAttachment
+	InReplyToEmailID string
+	To               []api.EmailAddressDto
+	Cc               []api.EmailAddressDto
+	Bcc              []api.EmailAddressDto
+}
+
+// OutgoingAttachment is a file to be attached to an email.
+type OutgoingAttachment struct {
+	Name        string
+	ContentType string
+	Content     []byte
 }
 
 // SendEmail seals msg for every recipient and the sender's own address, then
@@ -48,7 +57,25 @@ func SendEmail(ctx context.Context, client Client, token string, msg OutgoingMes
 		recipients = append(recipients, crypto.Recipient{Address: account.Address, PublicKey: account.PublicKey})
 	}
 
-	envelope, err := crypto.BuildEnvelope(msg.body(), recipients)
+	body := msg.body()
+	var attachments *[]api.AttachmentRefDto
+
+	if len(msg.Attachments) > 0 {
+		sessionKey, err := crypto.NewSessionKey()
+		if err != nil {
+			return fmt.Errorf("send email: %w", err)
+		}
+
+		refs, err := uploadAttachments(ctx, client, token, msg.Attachments, sessionKey)
+		if err != nil {
+			return err
+		}
+
+		body.AttachmentsSessionKey = sessionKey
+		attachments = &refs
+	}
+
+	envelope, err := crypto.BuildEnvelope(body, recipients)
 	if err != nil {
 		return fmt.Errorf("send email: seal message: %w", err)
 	}
@@ -59,9 +86,15 @@ func SendEmail(ctx context.Context, client Client, token string, msg OutgoingMes
 	}
 
 	block := toEncryptionBlock(envelope)
+
+	if msg.InReplyToEmailID != "" {
+		return submitReply(ctx, client, token, msg, block, attachments, deliveryMode)
+	}
+
 	_, err = client.SendEmail(ctx, token, api.SendEmailRequestDto{
 		Subject:      msg.Subject,
 		Encryption:   &block,
+		Attachments:  attachments,
 		To:           msg.To,
 		Cc:           optionalAddresses(msg.Cc),
 		Bcc:          optionalAddresses(msg.Bcc),
@@ -71,6 +104,62 @@ func SendEmail(ctx context.Context, client Client, token string, msg OutgoingMes
 		return fmt.Errorf("send email: %w", err)
 	}
 	return nil
+}
+
+// submitReply sends the message as an answer to another, so the backend files
+// it in that conversation rather than starting a new one.
+func submitReply(
+	ctx context.Context,
+	client Client,
+	token string,
+	msg OutgoingMessage,
+	block api.EncryptionBlockDto,
+	attachments *[]api.AttachmentRefDto,
+	deliveryMode api.SendEmailRequestDtoDeliveryMode,
+) error {
+	replyMode := api.ReplyEmailRequestDtoDeliveryMode(deliveryMode)
+	to := msg.To
+
+	_, err := client.ReplyEmail(ctx, token, msg.InReplyToEmailID, api.ReplyEmailRequestDto{
+		Subject:      &msg.Subject,
+		Encryption:   &block,
+		Attachments:  attachments,
+		To:           &to,
+		Cc:           optionalAddresses(msg.Cc),
+		Bcc:          optionalAddresses(msg.Bcc),
+		DeliveryMode: &replyMode,
+	})
+	if err != nil {
+		return fmt.Errorf("reply to email %s: %w", msg.InReplyToEmailID, err)
+	}
+	return nil
+}
+
+// uploadAttachments seals each file under sessionKey and stores it, returning
+// the references the email attaches them by.
+func uploadAttachments(ctx context.Context, client Client, token string, attachments []OutgoingAttachment, sessionKey []byte) ([]api.AttachmentRefDto, error) {
+	refs := make([]api.AttachmentRefDto, 0, len(attachments))
+
+	for _, attachment := range attachments {
+		sealed, err := crypto.EncryptSymmetrically(sessionKey, attachment.Content, nil)
+		if err != nil {
+			return nil, fmt.Errorf("send email: seal attachment %s: %w", attachment.Name, err)
+		}
+
+		uploaded, err := client.UploadAttachment(ctx, token, attachment.Name, attachment.ContentType, sealed)
+		if err != nil {
+			return nil, fmt.Errorf("send email: upload attachment %s: %w", attachment.Name, err)
+		}
+
+		refs = append(refs, api.AttachmentRefDto{
+			BlobId: uploaded.BlobId,
+			Name:   attachment.Name,
+			Size:   float32(len(sealed)),
+			Type:   attachment.ContentType,
+		})
+	}
+
+	return refs, nil
 }
 
 const previewPlaintextLength = 256

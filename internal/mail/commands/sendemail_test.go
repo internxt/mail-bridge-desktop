@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/hex"
@@ -163,6 +164,242 @@ func TestSendEmailSealsAnHTMLOnlyMessage(t *testing.T) {
 	}
 	if body.Preview == "" {
 		t.Error("an HTML-only message sealed an empty preview")
+	}
+}
+
+// TestSendEmailSealsAndUploadsAttachments is the point of the whole feature:
+// the file must leave encrypted, and under the very key the envelope hands the
+// recipient, or nobody will be able to open it.
+func TestSendEmailSealsAndUploadsAttachments(t *testing.T) {
+	publicKey := testRecipientPublicKeyBase64(t)
+	client := &fakeClient{
+		recipientKeys: []api.RecipientKeyDto{{Address: "bob@inxt.eu", PublicKey: &publicKey}},
+	}
+
+	content := []byte("el contenido del adjunto")
+	err := SendEmail(context.Background(), client, "tok", OutgoingMessage{
+		Subject:  "hola",
+		TextBody: "cuerpo",
+		To:       []api.EmailAddressDto{addr("bob@inxt.eu")},
+		Attachments: []OutgoingAttachment{{
+			Name:        "notas.txt",
+			ContentType: "text/plain",
+			Content:     content,
+		}},
+	}, Account{Address: "alice@inxt.eu"}, nil)
+	if err != nil {
+		t.Fatalf("SendEmail: %v", err)
+	}
+
+	if len(client.uploaded) != 1 {
+		t.Fatalf("uploaded %d attachments, want 1", len(client.uploaded))
+	}
+	uploaded := client.uploaded[0]
+
+	if bytes.Equal(uploaded.content, content) {
+		t.Fatal("the attachment travelled in the clear")
+	}
+	if uploaded.name != "notas.txt" || uploaded.contentType != "text/plain" {
+		t.Errorf("uploaded %q (%s), want notas.txt (text/plain)", uploaded.name, uploaded.contentType)
+	}
+
+	// The recipient opens the envelope for the key, then the file with it —
+	// exactly what DownloadAttachments does when reading.
+	sealed := sealedBody(t, client.sentEmail.Encryption, testRecipientPrivateKeyHex, "bob@inxt.eu")
+	if len(sealed.AttachmentsSessionKey) == 0 {
+		t.Fatal("the envelope carries no attachments session key")
+	}
+
+	opened, err := crypto.DecryptSymmetrically(sealed.AttachmentsSessionKey, uploaded.content, nil)
+	if err != nil {
+		t.Fatalf("the recipient cannot open the attachment: %v", err)
+	}
+	if !bytes.Equal(opened, content) {
+		t.Errorf("attachment opened as %q, want %q", opened, content)
+	}
+}
+
+// TestSendEmailReferencesTheUploadedAttachment checks the email actually
+// points at what was stored; a blob nobody references is a file that never
+// arrives.
+func TestSendEmailReferencesTheUploadedAttachment(t *testing.T) {
+	publicKey := testRecipientPublicKeyBase64(t)
+	client := &fakeClient{
+		recipientKeys: []api.RecipientKeyDto{{Address: "bob@inxt.eu", PublicKey: &publicKey}},
+	}
+
+	err := SendEmail(context.Background(), client, "tok", OutgoingMessage{
+		Subject:  "hola",
+		TextBody: "cuerpo",
+		To:       []api.EmailAddressDto{addr("bob@inxt.eu")},
+		Attachments: []OutgoingAttachment{
+			{Name: "uno.txt", ContentType: "text/plain", Content: []byte("uno")},
+			{Name: "dos.txt", ContentType: "text/plain", Content: []byte("dos")},
+		},
+	}, Account{Address: "alice@inxt.eu"}, nil)
+	if err != nil {
+		t.Fatalf("SendEmail: %v", err)
+	}
+
+	if client.sentEmail.Attachments == nil {
+		t.Fatal("the email references no attachments")
+	}
+	refs := *client.sentEmail.Attachments
+	if len(refs) != 2 {
+		t.Fatalf("got %d references, want 2", len(refs))
+	}
+	if refs[0].BlobId == "" || refs[0].Name != "uno.txt" {
+		t.Errorf("first reference = %+v, want uno.txt with a blob id", refs[0])
+	}
+	if refs[0].BlobId == refs[1].BlobId {
+		t.Error("both attachments reference the same blob")
+	}
+}
+
+// TestSendEmailStopsWhenAnAttachmentFails keeps a message from arriving
+// without the file its author attached: the client is told instead, and still
+// has the message to retry.
+func TestSendEmailStopsWhenAnAttachmentFails(t *testing.T) {
+	publicKey := testRecipientPublicKeyBase64(t)
+	client := &fakeClient{
+		recipientKeys: []api.RecipientKeyDto{{Address: "bob@inxt.eu", PublicKey: &publicKey}},
+		uploadErr:     errors.New("the upload allowance is exhausted"),
+	}
+
+	err := SendEmail(context.Background(), client, "tok", OutgoingMessage{
+		Subject:  "hola",
+		TextBody: "cuerpo",
+		To:       []api.EmailAddressDto{addr("bob@inxt.eu")},
+		Attachments: []OutgoingAttachment{{
+			Name: "notas.txt", ContentType: "text/plain", Content: []byte("x"),
+		}},
+	}, Account{Address: "alice@inxt.eu"}, nil)
+	if err == nil {
+		t.Fatal("expected the failed upload to stop the send")
+	}
+	if client.sendCalled {
+		t.Error("the email was sent even though its attachment never made it")
+	}
+}
+
+// TestSendEmailWithoutAttachmentsUploadsNothing keeps ordinary mail off the
+// upload endpoint.
+func TestSendEmailWithoutAttachmentsUploadsNothing(t *testing.T) {
+	publicKey := testRecipientPublicKeyBase64(t)
+	client := &fakeClient{
+		recipientKeys: []api.RecipientKeyDto{{Address: "bob@inxt.eu", PublicKey: &publicKey}},
+	}
+
+	err := SendEmail(context.Background(), client, "tok", OutgoingMessage{
+		Subject:  "hola",
+		TextBody: "cuerpo",
+		To:       []api.EmailAddressDto{addr("bob@inxt.eu")},
+	}, Account{Address: "alice@inxt.eu"}, nil)
+	if err != nil {
+		t.Fatalf("SendEmail: %v", err)
+	}
+
+	if len(client.uploaded) != 0 {
+		t.Errorf("uploaded %d attachments, want none", len(client.uploaded))
+	}
+	if client.sentEmail.Attachments != nil {
+		t.Error("an email with no attachments should not reference any")
+	}
+}
+
+// TestSendEmailRepliesThroughTheReplyEndpoint is what puts the answer in the
+// conversation: the ordinary send endpoint ignores the email being replied to,
+// so a reply has to go through its own.
+func TestSendEmailRepliesThroughTheReplyEndpoint(t *testing.T) {
+	publicKey := testRecipientPublicKeyBase64(t)
+	client := &fakeClient{
+		recipientKeys: []api.RecipientKeyDto{{Address: "bob@inxt.eu", PublicKey: &publicKey}},
+	}
+
+	err := SendEmail(context.Background(), client, "tok", OutgoingMessage{
+		Subject:          "Re: hola",
+		TextBody:         "respuesta",
+		InReplyToEmailID: "M1",
+		To:               []api.EmailAddressDto{addr("bob@inxt.eu")},
+	}, Account{Address: "alice@inxt.eu"}, nil)
+	if err != nil {
+		t.Fatalf("SendEmail: %v", err)
+	}
+
+	if client.sendCalled {
+		t.Error("a reply went through the plain send endpoint, so it would start its own thread")
+	}
+	if client.repliedTo != "M1" {
+		t.Errorf("replied to %q, want M1", client.repliedTo)
+	}
+
+	// A reply is still sealed like any other message.
+	if client.sentReply.Encryption == nil {
+		t.Fatal("the reply carries no encryption block")
+	}
+	body := sealedBody(t, client.sentReply.Encryption, testRecipientPrivateKeyHex, "bob@inxt.eu")
+	if body.Text != "respuesta" {
+		t.Errorf("sealed body = %q, want the reply body", body.Text)
+	}
+}
+
+// TestSendEmailRepliesWithTheComposedSubjectAndRecipients keeps what the user
+// wrote: the backend can derive both from the original, but the client already
+// resolved them and showing something else would surprise the sender.
+func TestSendEmailRepliesWithTheComposedSubjectAndRecipients(t *testing.T) {
+	publicKey := testRecipientPublicKeyBase64(t)
+	client := &fakeClient{
+		recipientKeys: []api.RecipientKeyDto{
+			{Address: "bob@inxt.eu", PublicKey: &publicKey},
+			{Address: "carol@inxt.eu", PublicKey: &publicKey},
+		},
+	}
+
+	err := SendEmail(context.Background(), client, "tok", OutgoingMessage{
+		Subject:          "Re: hola",
+		TextBody:         "respuesta",
+		InReplyToEmailID: "M1",
+		To:               []api.EmailAddressDto{addr("bob@inxt.eu")},
+		Cc:               []api.EmailAddressDto{addr("carol@inxt.eu")},
+	}, Account{Address: "alice@inxt.eu"}, nil)
+	if err != nil {
+		t.Fatalf("SendEmail: %v", err)
+	}
+
+	reply := client.sentReply
+	if reply.Subject == nil || *reply.Subject != "Re: hola" {
+		t.Errorf("subject = %v, want the one the client composed", reply.Subject)
+	}
+	if reply.To == nil || len(*reply.To) != 1 || (*reply.To)[0].Email != "bob@inxt.eu" {
+		t.Errorf("to = %v, want [bob@inxt.eu]", reply.To)
+	}
+	if reply.Cc == nil || len(*reply.Cc) != 1 {
+		t.Errorf("cc = %v, want [carol@inxt.eu]", reply.Cc)
+	}
+}
+
+// TestSendEmailWithoutAReplyIdUsesTheSendEndpoint is the other half: an
+// ordinary message must not be filed into somebody else's conversation.
+func TestSendEmailWithoutAReplyIdUsesTheSendEndpoint(t *testing.T) {
+	publicKey := testRecipientPublicKeyBase64(t)
+	client := &fakeClient{
+		recipientKeys: []api.RecipientKeyDto{{Address: "bob@inxt.eu", PublicKey: &publicKey}},
+	}
+
+	err := SendEmail(context.Background(), client, "tok", OutgoingMessage{
+		Subject:  "hola",
+		TextBody: "cuerpo",
+		To:       []api.EmailAddressDto{addr("bob@inxt.eu")},
+	}, Account{Address: "alice@inxt.eu"}, nil)
+	if err != nil {
+		t.Fatalf("SendEmail: %v", err)
+	}
+
+	if !client.sendCalled {
+		t.Error("an ordinary message did not reach the send endpoint")
+	}
+	if client.repliedTo != "" {
+		t.Errorf("it replied to %q, want nothing", client.repliedTo)
 	}
 }
 

@@ -119,6 +119,9 @@ func createGluonServer(config Config) (*gluon.Server, error) {
 	if config.TLSConfig != nil {
 		options = append(options, gluon.WithTLS(config.TLSConfig))
 	}
+	if config.StoreBuilder != nil {
+		options = append(options, gluon.WithStoreBuilder(config.StoreBuilder))
+	}
 
 	if config.LogProtocol {
 		log := logger.New("imap")

@@ -31,6 +31,9 @@ type fakeClient struct {
 	threadCalls int
 
 	savedDraft api.DraftEmailRequestDto
+
+	blobs           map[string][]byte
+	downloadedBlobs []string
 }
 
 func (f *fakeClient) GetUserFolder(ctx context.Context, token string, opts api.ListEmailsOptions) (api.EmailListResponseDto, error) {
@@ -74,13 +77,21 @@ func (f *fakeClient) SaveDraft(ctx context.Context, token string, draft api.Draf
 	return api.EmailResponseDto{Id: "D1", IsDraft: true}, nil
 }
 
-func (f *fakeClient) UpdateDraft(ctx context.Context, token, draftID string, draft api.DraftEmailRequestDto) (api.EmailResponseDto, error) {
-	f.savedDraft = draft
-	return api.EmailResponseDto{Id: draftID, IsDraft: true}, f.err
-}
-
 func (f *fakeClient) DiscardDraft(ctx context.Context, token, draftID string) error {
 	return f.err
+}
+
+func (f *fakeClient) ReplyEmail(ctx context.Context, token, emailID string, reply api.ReplyEmailRequestDto) (api.EmailCreatedResponseDto, error) {
+	return api.EmailCreatedResponseDto{}, f.err
+}
+
+func (f *fakeClient) UploadAttachment(ctx context.Context, token, name, contentType string, content []byte) (api.UploadAttachmentResponseDto, error) {
+	return api.UploadAttachmentResponseDto{BlobId: "B1", Name: name, Type: contentType}, f.err
+}
+
+func (f *fakeClient) DownloadAttachment(ctx context.Context, token, emailID, blobID string) ([]byte, error) {
+	f.downloadedBlobs = append(f.downloadedBlobs, blobID)
+	return f.blobs[blobID], f.err
 }
 
 func encryptedEmail(t *testing.T) api.EmailResponseDto {

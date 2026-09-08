@@ -13,9 +13,9 @@ import (
 	"mail-bridge-desktop/internal/api"
 )
 
-// messageIDDomain labels the Message-IDs the bridge generates for emails the
+// MessageIDDomain labels the Message-IDs the bridge generates for emails the
 // API returns without one.
-const messageIDDomain = "mail-bridge.internxt.local"
+const MessageIDDomain = "mail-bridge.internxt.local"
 
 // BuildLiteral turns an email into the RFC 5322 message an IMAP client expects.
 func BuildLiteral(email api.EmailResponseDto) ([]byte, error) {
@@ -38,6 +38,7 @@ func writeHeaders(buf *bytes.Buffer, email api.EmailResponseDto) error {
 
 	writeHeader(buf, "MIME-Version", "1.0")
 	writeHeader(buf, "Message-ID", messageID(email))
+	writeHeader(buf, "References", references(email))
 	writeHeader(buf, "Date", date.Format(time.RFC1123Z))
 	// Subjects are encoded because they routinely carry non-ASCII text.
 	writeHeader(buf, "Subject", mime.QEncoding.Encode("utf-8", email.Subject))
@@ -122,7 +123,31 @@ func writeQuotedPrintable(buf *bytes.Buffer, body string) error {
 // messageID reuses the email's own identifier, so refetching the same email
 // yields the same Message-ID and clients do not duplicate it.
 func messageID(email api.EmailResponseDto) string {
-	return fmt.Sprintf("<%s@%s>", email.Id, messageIDDomain)
+	return fmt.Sprintf("<%s@%s>", email.Id, MessageIDDomain)
+}
+
+// EmailIDFromMessageID is the inverse of messageID: it recovers the account's
+// own identifier from a Message-ID the bridge wrote.
+
+func EmailIDFromMessageID(value string) (string, bool) {
+	id := strings.TrimSpace(value)
+	id = strings.TrimPrefix(id, "<")
+	id = strings.TrimSuffix(id, ">")
+
+	emailID, domain, found := strings.Cut(id, "@")
+	if !found || emailID == "" || domain != MessageIDDomain {
+		return "", false
+	}
+	return emailID, true
+}
+
+// references is what groups a conversation in a mail client. Every email of a
+// thread names the same identifier, derived from the thread's own ID.
+func references(email api.EmailResponseDto) string {
+	if email.ThreadId == "" || email.ThreadId == email.Id {
+		return ""
+	}
+	return fmt.Sprintf("<%s@%s>", email.ThreadId, MessageIDDomain)
 }
 
 // boundary derives a separator from the content, keeping the literal stable

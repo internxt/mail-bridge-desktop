@@ -77,6 +77,37 @@ func TestSendEmailPostsAndDecodesResponse(t *testing.T) {
 	}
 }
 
+func TestReplyEmailPostsToTheParentsReplyPath(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Path; got != "/email/M1/reply" {
+			t.Errorf("path = %q, want /email/M1/reply", got)
+		}
+		if got := r.Method; got != http.MethodPost {
+			t.Errorf("method = %q, want POST", got)
+		}
+
+		var body ReplyEmailRequestDto
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		if body.Subject == nil || *body.Subject != "Re: hola" {
+			t.Errorf("subject = %v, want Re: hola", body.Subject)
+		}
+
+		w.Write([]byte(`{"id":"M2"}`))
+	}))
+	defer srv.Close()
+
+	subject := "Re: hola"
+	res, err := newTestClient(t, srv).ReplyEmail(context.Background(), "tok", "M1", ReplyEmailRequestDto{Subject: &subject})
+	if err != nil {
+		t.Fatalf("ReplyEmail: %v", err)
+	}
+	if res.Id != "M2" {
+		t.Errorf("id = %q, want M2", res.Id)
+	}
+}
+
 func TestGetMailAccountKeysDecodesResponse(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.URL.Path; got != "/users/me/mail-account/keys" {

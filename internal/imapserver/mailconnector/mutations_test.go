@@ -18,6 +18,7 @@ const (
 	inboxID  = imap.MailboxID("a")
 	trashID  = imap.MailboxID("b")
 	draftsID = imap.MailboxID("c")
+	sentID   = imap.MailboxID("d")
 )
 
 func connectorWithMailboxes(service MailService) *MailConnector {
@@ -25,6 +26,7 @@ func connectorWithMailboxes(service MailService) *MailConnector {
 	c.rememberMailboxType(api.MailboxResponseDto{Id: string(inboxID), Type: mailboxTypePtr(api.MailboxInbox)})
 	c.rememberMailboxType(api.MailboxResponseDto{Id: string(trashID), Type: mailboxTypePtr(api.MailboxTrash)})
 	c.rememberMailboxType(api.MailboxResponseDto{Id: string(draftsID), Type: mailboxTypePtr(api.MailboxDrafts)})
+	c.rememberMailboxType(api.MailboxResponseDto{Id: string(sentID), Type: mailboxTypePtr(api.MailboxSent)})
 	return c
 }
 
@@ -109,6 +111,24 @@ func TestRemoveMessagesFromTrashDeletes(t *testing.T) {
 	}
 }
 
+func TestRemoveMessagesFromDraftsDiscardsThem(t *testing.T) {
+	service := &fakeMailService{}
+	c := connectorWithMailboxes(service)
+
+	if err := c.RemoveMessagesFromMailbox(context.Background(), []imap.MessageID{"D1"}, draftsID); err != nil {
+		t.Fatalf("RemoveMessagesFromMailbox: %v", err)
+	}
+	if len(service.discardedDrafts) != 1 || service.discardedDrafts[0] != "D1" {
+		t.Fatalf("discarded %v, want [D1]", service.discardedDrafts)
+	}
+	if service.moved != nil {
+		t.Error("a replaced draft should not be moved to the trash")
+	}
+	if service.deleted != nil {
+		t.Error("a draft is discarded through its own endpoint, not deleted as ordinary mail")
+	}
+}
+
 func TestRemoveMessagesFromInboxMovesToTrash(t *testing.T) {
 	service := &fakeMailService{}
 	c := connectorWithMailboxes(service)
@@ -173,9 +193,8 @@ func TestCreateMessageInDraftsSavesADraft(t *testing.T) {
 	}
 }
 
-// TestCreateMessageOutsideDraftsIsRefused covers the append a client makes to
-// Sent after delivering: the API has no way to file a message into a folder,
-// so it is refused rather than silently dropped.
+// TestCreateMessageOutsideDraftsIsRefused covers a folder the API cannot file
+// a message into.
 func TestCreateMessageOutsideDraftsIsRefused(t *testing.T) {
 	service := &fakeMailService{}
 	c := connectorWithMailboxes(service)
@@ -186,6 +205,57 @@ func TestCreateMessageOutsideDraftsIsRefused(t *testing.T) {
 	}
 	if service.savedDraft != nil {
 		t.Error("nothing should have been saved")
+	}
+}
+
+// TestCreateMessageInSentIsAcceptedAndDropped covers the copy a client files
+// after delivering. The backend already stored one while sending, so keeping
+// this would show the message twice — and refusing it makes the client report
+// that it could not save the copy.
+func TestCreateMessageInSentIsAcceptedAndDropped(t *testing.T) {
+	service := &fakeMailService{}
+	c := connectorWithMailboxes(service)
+
+	message, _, err := c.CreateMessage(context.Background(), sentID, []byte("x"), imap.NewFlagSet(), time.Now())
+	if err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	if service.savedDraft != nil {
+		t.Error("a sent copy should not be stored as a draft")
+	}
+
+	// It has to be taken back: a sync never reports it as deleted, since it was
+	// never in the account to begin with.
+	select {
+	case update := <-c.updates:
+		deleted, isDeletion := update.(*imap.MessageDeleted)
+		if !isDeletion {
+			t.Fatalf("update = %T, want a deletion", update)
+		}
+		if deleted.MessageID != message.ID {
+			t.Errorf("deleted %v, want the message just accepted (%v)", deleted.MessageID, message.ID)
+		}
+	default:
+		t.Fatal("the accepted copy was never taken back, so it would linger in the client")
+	}
+}
+
+// TestCreateMessageInSentIsUniqueEachTime guards the rule Gluon enforces on an
+// append: a remote ID it already knows is an error.
+func TestCreateMessageInSentIsUniqueEachTime(t *testing.T) {
+	c := connectorWithMailboxes(&fakeMailService{})
+
+	first, _, err := c.CreateMessage(context.Background(), sentID, []byte("x"), imap.NewFlagSet(), time.Now())
+	if err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	second, _, err := c.CreateMessage(context.Background(), sentID, []byte("x"), imap.NewFlagSet(), time.Now())
+	if err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+
+	if first.ID == second.ID {
+		t.Errorf("both appends got id %q; Gluon rejects a repeated remote ID", first.ID)
 	}
 }
 
