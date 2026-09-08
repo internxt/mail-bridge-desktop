@@ -25,6 +25,8 @@ type fakeClient struct {
 	sendErr            error
 	sentEmail          api.SendEmailRequestDto
 	sendCalled         bool
+	repliedTo          string
+	sentReply          api.ReplyEmailRequestDto
 	mailAccountKeys    api.MailAccountKeysResponseDto
 	mailAccountKeysErr error
 
@@ -104,6 +106,15 @@ func (f *fakeClient) SaveDraft(ctx context.Context, token string, draft api.Draf
 func (f *fakeClient) DiscardDraft(ctx context.Context, token, draftID string) error {
 	f.discardedDraft = draftID
 	return f.err
+}
+
+func (f *fakeClient) ReplyEmail(ctx context.Context, token, emailID string, reply api.ReplyEmailRequestDto) (api.EmailCreatedResponseDto, error) {
+	f.repliedTo = emailID
+	f.sentReply = reply
+	if f.sendErr != nil {
+		return api.EmailCreatedResponseDto{}, f.sendErr
+	}
+	return api.EmailCreatedResponseDto{Id: "M2"}, nil
 }
 
 func (f *fakeClient) UploadAttachment(ctx context.Context, token, name, contentType string, content []byte) (api.UploadAttachmentResponseDto, error) {

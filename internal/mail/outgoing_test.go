@@ -214,6 +214,62 @@ func TestParseOutgoingMessageWithoutAttachmentsFindsNone(t *testing.T) {
 	}
 }
 
+// TestParseOutgoingMessageRecognisesAReply covers the round trip: the client
+// answers with the Message-ID the bridge gave it, which carries the account's
+// own identifier for that email.
+func TestParseOutgoingMessageRecognisesAReply(t *testing.T) {
+	raw := "From: alice@inxt.eu\r\n" +
+		"To: bob@inxt.eu\r\n" +
+		"Subject: Re: hola\r\n" +
+		"In-Reply-To: <M1a2b3c@" + MessageIDDomain + ">\r\n" +
+		"\r\n" +
+		"respuesta\r\n"
+
+	msg, err := ParseOutgoingMessage([]byte(raw), []string{"bob@inxt.eu"})
+	if err != nil {
+		t.Fatalf("ParseOutgoingMessage: %v", err)
+	}
+	if msg.InReplyToEmailID != "M1a2b3c" {
+		t.Errorf("InReplyToEmailID = %q, want M1a2b3c", msg.InReplyToEmailID)
+	}
+}
+
+// TestParseOutgoingMessageIgnoresAForeignInReplyTo is the degrade-gracefully
+// case: answering a message the account never served leaves no id, and the
+// message is sent as an ordinary email rather than failing.
+func TestParseOutgoingMessageIgnoresAForeignInReplyTo(t *testing.T) {
+	raw := "From: alice@inxt.eu\r\n" +
+		"To: bob@inxt.eu\r\n" +
+		"Subject: Re: hola\r\n" +
+		"In-Reply-To: <CAB123456@mail.gmail.com>\r\n" +
+		"\r\n" +
+		"respuesta\r\n"
+
+	msg, err := ParseOutgoingMessage([]byte(raw), []string{"bob@inxt.eu"})
+	if err != nil {
+		t.Fatalf("ParseOutgoingMessage: %v", err)
+	}
+	if msg.InReplyToEmailID != "" {
+		t.Errorf("InReplyToEmailID = %q, want empty for a Message-ID from elsewhere", msg.InReplyToEmailID)
+	}
+}
+
+func TestParseOutgoingMessageWithoutInReplyToIsNotAReply(t *testing.T) {
+	raw := "From: alice@inxt.eu\r\n" +
+		"To: bob@inxt.eu\r\n" +
+		"Subject: hola\r\n" +
+		"\r\n" +
+		"cuerpo\r\n"
+
+	msg, err := ParseOutgoingMessage([]byte(raw), []string{"bob@inxt.eu"})
+	if err != nil {
+		t.Fatalf("ParseOutgoingMessage: %v", err)
+	}
+	if msg.InReplyToEmailID != "" {
+		t.Errorf("InReplyToEmailID = %q, want empty", msg.InReplyToEmailID)
+	}
+}
+
 // TestParseOutgoingMessageInfersBcc is the case that matters: Thunderbird
 // omits the Bcc: header when it transmits, so the only way to recover it is
 // the difference between RCPT TO and what To:/Cc: address.

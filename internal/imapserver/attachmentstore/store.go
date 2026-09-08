@@ -4,13 +4,13 @@ import (
 	"bytes"
 	"context"
 	"io"
-	"strings"
 
 	"github.com/ProtonMail/gluon/imap"
 	"github.com/ProtonMail/gluon/rfc822"
 	"github.com/ProtonMail/gluon/store"
 
 	"mail-bridge-desktop/internal/logger"
+	"mail-bridge-desktop/internal/mail"
 )
 
 const (
@@ -18,8 +18,8 @@ const (
 	internalIDKey   = "X-Pm-Gluon-Id"
 )
 
-func NewBuilder(inner store.Builder, resolver Resolver, messageIDDomain string, log *logger.Logger) *Builder {
-	return &Builder{inner: inner, resolver: resolver, messageIDDomain: messageIDDomain, log: log}
+func NewBuilder(inner store.Builder, resolver Resolver, log *logger.Logger) *Builder {
+	return &Builder{inner: inner, resolver: resolver, log: log}
 }
 
 func (b *Builder) New(dir, userID string, passphrase []byte) (store.Store, error) {
@@ -29,11 +29,10 @@ func (b *Builder) New(dir, userID string, passphrase []byte) (store.Store, error
 	}
 
 	return &Store{
-		inner:           inner,
-		resolver:        b.resolver,
-		messageIDDomain: b.messageIDDomain,
-		log:             b.log,
-		resolved:        make(map[imap.InternalMessageID]bool),
+		inner:    inner,
+		resolver: b.resolver,
+		log:      b.log,
+		resolved: make(map[imap.InternalMessageID]bool),
 	}, nil
 }
 
@@ -59,7 +58,7 @@ func (s *Store) Get(messageID imap.InternalMessageID) ([]byte, error) {
 		return literal, nil
 	}
 
-	emailID, found := emailIDOf(literal, s.messageIDDomain)
+	emailID, found := emailIDOf(literal)
 	if !found {
 		s.markResolved(messageID)
 		return literal, nil
@@ -121,18 +120,13 @@ func (s *Store) forget(messageID imap.InternalMessageID) {
 // emailIDOf reads the account's own ID for a message out of its Message-ID,
 // which internal/mail builds from it. A message without one is not ours to
 // complete — a draft a client just appended, for instance.
-func emailIDOf(literal []byte, messageIDDomain string) (string, bool) {
+func emailIDOf(literal []byte) (string, bool) {
 	value, err := rfc822.GetHeaderValue(literal, messageIDHeader)
 	if err != nil || value == "" {
 		return "", false
 	}
 
-	id := strings.TrimPrefix(strings.TrimSuffix(strings.TrimSpace(value), ">"), "<")
-	address, domain, found := strings.Cut(id, "@")
-	if !found || address == "" || domain != messageIDDomain {
-		return "", false
-	}
-	return address, true
+	return mail.EmailIDFromMessageID(value)
 }
 
 // carryInternalID copies onto the rebuilt message the header Gluon stamps on

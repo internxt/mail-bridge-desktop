@@ -81,6 +81,10 @@ func (f *fakeClient) DiscardDraft(ctx context.Context, token, draftID string) er
 	return f.err
 }
 
+func (f *fakeClient) ReplyEmail(ctx context.Context, token, emailID string, reply api.ReplyEmailRequestDto) (api.EmailCreatedResponseDto, error) {
+	return api.EmailCreatedResponseDto{}, f.err
+}
+
 func (f *fakeClient) UploadAttachment(ctx context.Context, token, name, contentType string, content []byte) (api.UploadAttachmentResponseDto, error) {
 	return api.UploadAttachmentResponseDto{BlobId: "B1", Name: name, Type: contentType}, f.err
 }

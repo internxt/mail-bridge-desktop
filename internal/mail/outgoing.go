@@ -60,14 +60,30 @@ func parseOutgoingMessage(raw []byte, envelopeRecipients []string) (commands.Out
 	}
 
 	return commands.OutgoingMessage{
-		Subject:     subject,
-		TextBody:    content.text,
-		HTMLBody:    content.html,
-		Attachments: content.attachments,
-		To:          to,
-		Cc:          cc,
-		Bcc:         bccFrom(to, cc, envelopeRecipients),
+		Subject:          subject,
+		TextBody:         content.text,
+		HTMLBody:         content.html,
+		Attachments:      content.attachments,
+		InReplyToEmailID: repliedEmailID(msg.Header.Get("In-Reply-To")),
+		To:               to,
+		Cc:               cc,
+		Bcc:              bccFrom(to, cc, envelopeRecipients),
 	}, nil
+}
+
+// repliedEmailID is the email this message replies to, when that email is one
+// the bridge served.
+func repliedEmailID(inReplyTo string) string {
+	if inReplyTo == "" {
+		return ""
+	}
+
+	ids := strings.Fields(inReplyTo)
+	emailID, found := EmailIDFromMessageID(ids[len(ids)-1])
+	if !found {
+		return ""
+	}
+	return emailID
 }
 
 // messageContent is what a message carries: its bodies, and the files

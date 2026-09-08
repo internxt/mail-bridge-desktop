@@ -12,13 +12,14 @@ import (
 
 // OutgoingMessage is a composed email, ready to send.
 type OutgoingMessage struct {
-	Subject     string
-	HTMLBody    string
-	TextBody    string
-	Attachments []OutgoingAttachment
-	To          []api.EmailAddressDto
-	Cc          []api.EmailAddressDto
-	Bcc         []api.EmailAddressDto
+	Subject          string
+	HTMLBody         string
+	TextBody         string
+	Attachments      []OutgoingAttachment
+	InReplyToEmailID string
+	To               []api.EmailAddressDto
+	Cc               []api.EmailAddressDto
+	Bcc              []api.EmailAddressDto
 }
 
 // OutgoingAttachment is a file to be attached to an email.
@@ -85,6 +86,11 @@ func SendEmail(ctx context.Context, client Client, token string, msg OutgoingMes
 	}
 
 	block := toEncryptionBlock(envelope)
+
+	if msg.InReplyToEmailID != "" {
+		return submitReply(ctx, client, token, msg, block, attachments, deliveryMode)
+	}
+
 	_, err = client.SendEmail(ctx, token, api.SendEmailRequestDto{
 		Subject:      msg.Subject,
 		Encryption:   &block,
@@ -96,6 +102,35 @@ func SendEmail(ctx context.Context, client Client, token string, msg OutgoingMes
 	})
 	if err != nil {
 		return fmt.Errorf("send email: %w", err)
+	}
+	return nil
+}
+
+// submitReply sends the message as an answer to another, so the backend files
+// it in that conversation rather than starting a new one.
+func submitReply(
+	ctx context.Context,
+	client Client,
+	token string,
+	msg OutgoingMessage,
+	block api.EncryptionBlockDto,
+	attachments *[]api.AttachmentRefDto,
+	deliveryMode api.SendEmailRequestDtoDeliveryMode,
+) error {
+	replyMode := api.ReplyEmailRequestDtoDeliveryMode(deliveryMode)
+	to := msg.To
+
+	_, err := client.ReplyEmail(ctx, token, msg.InReplyToEmailID, api.ReplyEmailRequestDto{
+		Subject:      &msg.Subject,
+		Encryption:   &block,
+		Attachments:  attachments,
+		To:           &to,
+		Cc:           optionalAddresses(msg.Cc),
+		Bcc:          optionalAddresses(msg.Bcc),
+		DeliveryMode: &replyMode,
+	})
+	if err != nil {
+		return fmt.Errorf("reply to email %s: %w", msg.InReplyToEmailID, err)
 	}
 	return nil
 }

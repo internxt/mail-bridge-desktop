@@ -15,18 +15,16 @@ type Resolver interface {
 }
 
 type Store struct {
-	inner           store.Store
-	resolver        Resolver
-	messageIDDomain string
-	log             *logger.Logger
+	inner    store.Store
+	resolver Resolver
+	log      *logger.Logger
 
 	resolvedMutex sync.Mutex
 	resolved      map[imap.InternalMessageID]bool
 }
 
 type Builder struct {
-	inner           store.Builder
-	resolver        Resolver
-	messageIDDomain string
-	log             *logger.Logger
+	inner    store.Builder
+	resolver Resolver
+	log      *logger.Logger
 }
