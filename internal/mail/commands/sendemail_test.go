@@ -307,6 +307,102 @@ func TestSendEmailWithoutAttachmentsUploadsNothing(t *testing.T) {
 	}
 }
 
+// TestSendEmailRepliesThroughTheReplyEndpoint is what puts the answer in the
+// conversation: the ordinary send endpoint ignores the email being replied to,
+// so a reply has to go through its own.
+func TestSendEmailRepliesThroughTheReplyEndpoint(t *testing.T) {
+	publicKey := testRecipientPublicKeyBase64(t)
+	client := &fakeClient{
+		recipientKeys: []api.RecipientKeyDto{{Address: "bob@inxt.eu", PublicKey: &publicKey}},
+	}
+
+	err := SendEmail(context.Background(), client, "tok", OutgoingMessage{
+		Subject:          "Re: hola",
+		TextBody:         "respuesta",
+		InReplyToEmailID: "M1",
+		To:               []api.EmailAddressDto{addr("bob@inxt.eu")},
+	}, Account{Address: "alice@inxt.eu"}, nil)
+	if err != nil {
+		t.Fatalf("SendEmail: %v", err)
+	}
+
+	if client.sendCalled {
+		t.Error("a reply went through the plain send endpoint, so it would start its own thread")
+	}
+	if client.repliedTo != "M1" {
+		t.Errorf("replied to %q, want M1", client.repliedTo)
+	}
+
+	// A reply is still sealed like any other message.
+	if client.sentReply.Encryption == nil {
+		t.Fatal("the reply carries no encryption block")
+	}
+	body := sealedBody(t, client.sentReply.Encryption, testRecipientPrivateKeyHex, "bob@inxt.eu")
+	if body.Text != "respuesta" {
+		t.Errorf("sealed body = %q, want the reply body", body.Text)
+	}
+}
+
+// TestSendEmailRepliesWithTheComposedSubjectAndRecipients keeps what the user
+// wrote: the backend can derive both from the original, but the client already
+// resolved them and showing something else would surprise the sender.
+func TestSendEmailRepliesWithTheComposedSubjectAndRecipients(t *testing.T) {
+	publicKey := testRecipientPublicKeyBase64(t)
+	client := &fakeClient{
+		recipientKeys: []api.RecipientKeyDto{
+			{Address: "bob@inxt.eu", PublicKey: &publicKey},
+			{Address: "carol@inxt.eu", PublicKey: &publicKey},
+		},
+	}
+
+	err := SendEmail(context.Background(), client, "tok", OutgoingMessage{
+		Subject:          "Re: hola",
+		TextBody:         "respuesta",
+		InReplyToEmailID: "M1",
+		To:               []api.EmailAddressDto{addr("bob@inxt.eu")},
+		Cc:               []api.EmailAddressDto{addr("carol@inxt.eu")},
+	}, Account{Address: "alice@inxt.eu"}, nil)
+	if err != nil {
+		t.Fatalf("SendEmail: %v", err)
+	}
+
+	reply := client.sentReply
+	if reply.Subject == nil || *reply.Subject != "Re: hola" {
+		t.Errorf("subject = %v, want the one the client composed", reply.Subject)
+	}
+	if reply.To == nil || len(*reply.To) != 1 || (*reply.To)[0].Email != "bob@inxt.eu" {
+		t.Errorf("to = %v, want [bob@inxt.eu]", reply.To)
+	}
+	if reply.Cc == nil || len(*reply.Cc) != 1 {
+		t.Errorf("cc = %v, want [carol@inxt.eu]", reply.Cc)
+	}
+}
+
+// TestSendEmailWithoutAReplyIdUsesTheSendEndpoint is the other half: an
+// ordinary message must not be filed into somebody else's conversation.
+func TestSendEmailWithoutAReplyIdUsesTheSendEndpoint(t *testing.T) {
+	publicKey := testRecipientPublicKeyBase64(t)
+	client := &fakeClient{
+		recipientKeys: []api.RecipientKeyDto{{Address: "bob@inxt.eu", PublicKey: &publicKey}},
+	}
+
+	err := SendEmail(context.Background(), client, "tok", OutgoingMessage{
+		Subject:  "hola",
+		TextBody: "cuerpo",
+		To:       []api.EmailAddressDto{addr("bob@inxt.eu")},
+	}, Account{Address: "alice@inxt.eu"}, nil)
+	if err != nil {
+		t.Fatalf("SendEmail: %v", err)
+	}
+
+	if !client.sendCalled {
+		t.Error("an ordinary message did not reach the send endpoint")
+	}
+	if client.repliedTo != "" {
+		t.Errorf("it replied to %q, want nothing", client.repliedTo)
+	}
+}
+
 func TestSendEmailIncludesTheSendersOwnWrappedKey(t *testing.T) {
 	publicKey := testRecipientPublicKeyBase64(t)
 	client := &fakeClient{

@@ -43,6 +43,46 @@ func parseLiteral(t *testing.T, email api.EmailResponseDto) *mail.Message {
 	return msg
 }
 
+// TestBuildLiteralGroupsAThread is what makes a client show a conversation
+// together: every message of a thread names the same identifier, so they are
+// grouped without the API having to publish the real reference chain.
+func TestBuildLiteralGroupsAThread(t *testing.T) {
+	first := sampleEmail()
+	first.Id = "M1"
+	first.ThreadId = "T1"
+
+	second := sampleEmail()
+	second.Id = "M2"
+	second.ThreadId = "T1"
+
+	firstReferences := parseLiteral(t, first).Header.Get("References")
+	secondReferences := parseLiteral(t, second).Header.Get("References")
+
+	if firstReferences == "" {
+		t.Fatal("a threaded message carries no References, so nothing groups it")
+	}
+	if firstReferences != secondReferences {
+		t.Errorf("References differ across the thread: %q vs %q", firstReferences, secondReferences)
+	}
+	// The two are still distinct messages.
+	if parseLiteral(t, first).Header.Get("Message-ID") == parseLiteral(t, second).Header.Get("Message-ID") {
+		t.Error("both messages share a Message-ID")
+	}
+}
+
+// TestBuildLiteralLeavesALoneMessageUnthreaded keeps a conversation of one
+// from pointing at itself, which some clients read as a reply to a message
+// they never received.
+func TestBuildLiteralLeavesALoneMessageUnthreaded(t *testing.T) {
+	email := sampleEmail()
+	email.Id = "M1"
+	email.ThreadId = "M1"
+
+	if got := parseLiteral(t, email).Header.Get("References"); got != "" {
+		t.Errorf("References = %q, want none for a message alone in its thread", got)
+	}
+}
+
 func TestBuildLiteralHeaders(t *testing.T) {
 	msg := parseLiteral(t, sampleEmail())
 

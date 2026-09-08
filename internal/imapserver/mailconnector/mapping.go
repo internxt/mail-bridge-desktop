@@ -117,6 +117,9 @@ func summaryLiteral(summary api.EmailSummaryResponseDto) []byte {
 	var message strings.Builder
 
 	message.WriteString("MIME-Version: 1.0\r\n")
+	if summary.ThreadId != "" && summary.ThreadId != summary.Id {
+		fmt.Fprintf(&message, "References: <%s@%s>\r\n", summary.ThreadId, mail.MessageIDDomain)
+	}
 	fmt.Fprintf(&message, "Message-ID: <%s@%s>\r\n", summary.Id, mail.MessageIDDomain)
 	fmt.Fprintf(&message, "Date: %s\r\n", receivedAt(summary).Format(time.RFC1123Z))
 	fmt.Fprintf(&message, "Subject: %s\r\n", headerValue(summary.Subject))

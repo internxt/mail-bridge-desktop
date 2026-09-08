@@ -133,7 +133,6 @@ func attachmentStoreBuilder(service *mail.MailService) gluonstore.Builder {
 	return attachmentstore.NewBuilder(
 		&gluonstore.OnDiskStoreBuilder{},
 		service,
-		mail.MessageIDDomain,
 		logger.New("imap"),
 	)
 }
