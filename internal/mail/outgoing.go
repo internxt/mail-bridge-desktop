@@ -2,6 +2,7 @@ package mail
 
 import (
 	"bytes"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"mime"
@@ -53,19 +54,28 @@ func parseOutgoingMessage(raw []byte, envelopeRecipients []string) (commands.Out
 		return commands.OutgoingMessage{}, err
 	}
 
-	textBody, htmlBody, err := readBody(msg.Header, msg.Body)
+	content, err := readBody(msg.Header, msg.Body)
 	if err != nil {
 		return commands.OutgoingMessage{}, err
 	}
 
 	return commands.OutgoingMessage{
-		Subject:  subject,
-		TextBody: textBody,
-		HTMLBody: htmlBody,
-		To:       to,
-		Cc:       cc,
-		Bcc:      bccFrom(to, cc, envelopeRecipients),
+		Subject:     subject,
+		TextBody:    content.text,
+		HTMLBody:    content.html,
+		Attachments: content.attachments,
+		To:          to,
+		Cc:          cc,
+		Bcc:         bccFrom(to, cc, envelopeRecipients),
 	}, nil
+}
+
+// messageContent is what a message carries: its bodies, and the files
+// attached to it.
+type messageContent struct {
+	text        string
+	html        string
+	attachments []commands.OutgoingAttachment
 }
 
 func decodeSubject(raw string) (string, error) {
@@ -116,25 +126,30 @@ func bccFrom(to, cc []api.EmailAddressDto, envelopeRecipients []string) []api.Em
 	return bcc
 }
 
-// readBody returns the plain-text and HTML bodies of a message, whichever it
-// carries. A simple message has only one; a multipart/alternative one can
-// carry both, mirroring what writeAlternative in mime.go produces on the way
-// out.
-func readBody(header mail.Header, body io.Reader) (text, html string, err error) {
+// readBody returns the bodies of a message and the files hanging off it.
+//
+// A simple message has one body; a multipart/alternative one can carry both,
+// mirroring what writeAlternative in mime.go produces on the way out. A
+// message with attachments wraps that in a multipart/mixed, so the parts are
+// walked recursively rather than only at the top level.
+func readBody(header mail.Header, body io.Reader) (content messageContent, err error) {
 	mediaType, params := mediaTypeOf(header.Get("Content-Type"))
 
 	if strings.HasPrefix(mediaType, "multipart/") {
-		return readMultipartBody(body, params["boundary"])
+		err := readParts(&content, body, params["boundary"])
+		return content, err
 	}
 
-	content, err := io.ReadAll(decodedPartReader(textproto.MIMEHeader(header), body))
+	text, err := io.ReadAll(decodedPartReader(textproto.MIMEHeader(header), body))
 	if err != nil {
-		return "", "", fmt.Errorf("read body: %w", err)
+		return messageContent{}, fmt.Errorf("read body: %w", err)
 	}
 	if mediaType == "text/html" {
-		return "", string(content), nil
+		content.html = string(text)
+	} else {
+		content.text = string(text)
 	}
-	return string(content), "", nil
+	return content, nil
 }
 
 // mediaTypeOf parses a Content-Type, treating a missing or unparseable one as
@@ -151,43 +166,111 @@ func mediaTypeOf(contentType string) (string, map[string]string) {
 	return mediaType, params
 }
 
-func readMultipartBody(body io.Reader, boundary string) (text, html string, err error) {
+// readParts walks one multipart level, descending into any nested one.
+func readParts(content *messageContent, body io.Reader, boundary string) error {
+	if boundary == "" {
+		return fmt.Errorf("read multipart body: no boundary")
+	}
+
 	reader := multipart.NewReader(body, boundary)
 	for {
 		part, err := reader.NextPart()
 		if err == io.EOF {
-			break
+			return nil
 		}
 		if err != nil {
-			return "", "", fmt.Errorf("read multipart body: %w", err)
+			return fmt.Errorf("read multipart body: %w", err)
 		}
 
-		mediaType, _, err := mime.ParseMediaType(part.Header.Get("Content-Type"))
-		if err != nil {
-			continue
-		}
-
-		content, err := io.ReadAll(decodedPartReader(part.Header, part))
-		if err != nil {
-			return "", "", fmt.Errorf("read part: %w", err)
-		}
-
-		switch mediaType {
-		case "text/plain":
-			text = string(content)
-		case "text/html":
-			html = string(content)
+		if err := readPart(content, part); err != nil {
+			return err
 		}
 	}
-	return text, html, nil
 }
 
-// decodedPartReader undoes a part's Content-Transfer-Encoding, mirroring what
-// writeAlternative in mime.go applies on the way out: quoted-printable, or
-// the bytes as they are for anything else.
-func decodedPartReader(header textproto.MIMEHeader, r io.Reader) io.Reader {
-	if strings.EqualFold(header.Get("Content-Transfer-Encoding"), "quoted-printable") {
-		return quotedprintable.NewReader(r)
+func readPart(content *messageContent, part *multipart.Part) error {
+	mediaType, params := mediaTypeOf(part.Header.Get("Content-Type"))
+
+	if strings.HasPrefix(mediaType, "multipart/") {
+		return readParts(content, part, params["boundary"])
 	}
-	return r
+
+	decoded, err := io.ReadAll(decodedPartReader(part.Header, part))
+	if err != nil {
+		return fmt.Errorf("read part: %w", err)
+	}
+
+	if name := attachmentName(part, params); name != "" {
+		content.attachments = append(content.attachments, commands.OutgoingAttachment{
+			Name:        name,
+			ContentType: mediaType,
+			Content:     decoded,
+		})
+		return nil
+	}
+
+	switch mediaType {
+	case "text/plain":
+		content.text = string(decoded)
+	case "text/html":
+		content.html = string(decoded)
+	}
+	return nil
+}
+
+// attachmentName returns the file name a part travels under, or empty when the
+// part is not a file.
+func attachmentName(part *multipart.Part, contentTypeParams map[string]string) string {
+	disposition, dispositionParams := mediaTypeOf(part.Header.Get("Content-Disposition"))
+
+	name := dispositionParams["filename"]
+	if name == "" {
+		name = contentTypeParams["name"]
+	}
+	if name == "" {
+		if strings.EqualFold(disposition, "attachment") {
+			return "attachment"
+		}
+		return ""
+	}
+
+	if decoded, err := new(mime.WordDecoder).DecodeHeader(name); err == nil {
+		return decoded
+	}
+	return name
+}
+
+// decodedPartReader undoes a part's Content-Transfer-Encoding: base64 for the
+// files a client attaches, quoted-printable for the text it writes, and the
+// bytes as they are for anything else.
+func decodedPartReader(header textproto.MIMEHeader, r io.Reader) io.Reader {
+	switch strings.ToLower(strings.TrimSpace(header.Get("Content-Transfer-Encoding"))) {
+	case "quoted-printable":
+		return quotedprintable.NewReader(r)
+	case "base64":
+		return base64.NewDecoder(base64.StdEncoding, newlineStripper{r})
+	default:
+		return r
+	}
+}
+
+type newlineStripper struct{ inner io.Reader }
+
+func (s newlineStripper) Read(p []byte) (int, error) {
+	read, err := s.inner.Read(p)
+
+	kept := 0
+	for i := 0; i < read; i++ {
+		if p[i] != '\r' && p[i] != '\n' {
+			p[kept] = p[i]
+			kept++
+		}
+	}
+
+	// Read must not report zero bytes with a nil error, which is what stripping
+	// a chunk of pure line breaks would do.
+	if kept == 0 && err == nil {
+		return s.Read(p)
+	}
+	return kept, err
 }

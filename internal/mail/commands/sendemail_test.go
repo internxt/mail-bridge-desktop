@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/hex"
@@ -163,6 +164,146 @@ func TestSendEmailSealsAnHTMLOnlyMessage(t *testing.T) {
 	}
 	if body.Preview == "" {
 		t.Error("an HTML-only message sealed an empty preview")
+	}
+}
+
+// TestSendEmailSealsAndUploadsAttachments is the point of the whole feature:
+// the file must leave encrypted, and under the very key the envelope hands the
+// recipient, or nobody will be able to open it.
+func TestSendEmailSealsAndUploadsAttachments(t *testing.T) {
+	publicKey := testRecipientPublicKeyBase64(t)
+	client := &fakeClient{
+		recipientKeys: []api.RecipientKeyDto{{Address: "bob@inxt.eu", PublicKey: &publicKey}},
+	}
+
+	content := []byte("el contenido del adjunto")
+	err := SendEmail(context.Background(), client, "tok", OutgoingMessage{
+		Subject:  "hola",
+		TextBody: "cuerpo",
+		To:       []api.EmailAddressDto{addr("bob@inxt.eu")},
+		Attachments: []OutgoingAttachment{{
+			Name:        "notas.txt",
+			ContentType: "text/plain",
+			Content:     content,
+		}},
+	}, Account{Address: "alice@inxt.eu"}, nil)
+	if err != nil {
+		t.Fatalf("SendEmail: %v", err)
+	}
+
+	if len(client.uploaded) != 1 {
+		t.Fatalf("uploaded %d attachments, want 1", len(client.uploaded))
+	}
+	uploaded := client.uploaded[0]
+
+	if bytes.Equal(uploaded.content, content) {
+		t.Fatal("the attachment travelled in the clear")
+	}
+	if uploaded.name != "notas.txt" || uploaded.contentType != "text/plain" {
+		t.Errorf("uploaded %q (%s), want notas.txt (text/plain)", uploaded.name, uploaded.contentType)
+	}
+
+	// The recipient opens the envelope for the key, then the file with it —
+	// exactly what DownloadAttachments does when reading.
+	sealed := sealedBody(t, client.sentEmail.Encryption, testRecipientPrivateKeyHex, "bob@inxt.eu")
+	if len(sealed.AttachmentsSessionKey) == 0 {
+		t.Fatal("the envelope carries no attachments session key")
+	}
+
+	opened, err := crypto.DecryptSymmetrically(sealed.AttachmentsSessionKey, uploaded.content, nil)
+	if err != nil {
+		t.Fatalf("the recipient cannot open the attachment: %v", err)
+	}
+	if !bytes.Equal(opened, content) {
+		t.Errorf("attachment opened as %q, want %q", opened, content)
+	}
+}
+
+// TestSendEmailReferencesTheUploadedAttachment checks the email actually
+// points at what was stored; a blob nobody references is a file that never
+// arrives.
+func TestSendEmailReferencesTheUploadedAttachment(t *testing.T) {
+	publicKey := testRecipientPublicKeyBase64(t)
+	client := &fakeClient{
+		recipientKeys: []api.RecipientKeyDto{{Address: "bob@inxt.eu", PublicKey: &publicKey}},
+	}
+
+	err := SendEmail(context.Background(), client, "tok", OutgoingMessage{
+		Subject:  "hola",
+		TextBody: "cuerpo",
+		To:       []api.EmailAddressDto{addr("bob@inxt.eu")},
+		Attachments: []OutgoingAttachment{
+			{Name: "uno.txt", ContentType: "text/plain", Content: []byte("uno")},
+			{Name: "dos.txt", ContentType: "text/plain", Content: []byte("dos")},
+		},
+	}, Account{Address: "alice@inxt.eu"}, nil)
+	if err != nil {
+		t.Fatalf("SendEmail: %v", err)
+	}
+
+	if client.sentEmail.Attachments == nil {
+		t.Fatal("the email references no attachments")
+	}
+	refs := *client.sentEmail.Attachments
+	if len(refs) != 2 {
+		t.Fatalf("got %d references, want 2", len(refs))
+	}
+	if refs[0].BlobId == "" || refs[0].Name != "uno.txt" {
+		t.Errorf("first reference = %+v, want uno.txt with a blob id", refs[0])
+	}
+	if refs[0].BlobId == refs[1].BlobId {
+		t.Error("both attachments reference the same blob")
+	}
+}
+
+// TestSendEmailStopsWhenAnAttachmentFails keeps a message from arriving
+// without the file its author attached: the client is told instead, and still
+// has the message to retry.
+func TestSendEmailStopsWhenAnAttachmentFails(t *testing.T) {
+	publicKey := testRecipientPublicKeyBase64(t)
+	client := &fakeClient{
+		recipientKeys: []api.RecipientKeyDto{{Address: "bob@inxt.eu", PublicKey: &publicKey}},
+		uploadErr:     errors.New("the upload allowance is exhausted"),
+	}
+
+	err := SendEmail(context.Background(), client, "tok", OutgoingMessage{
+		Subject:  "hola",
+		TextBody: "cuerpo",
+		To:       []api.EmailAddressDto{addr("bob@inxt.eu")},
+		Attachments: []OutgoingAttachment{{
+			Name: "notas.txt", ContentType: "text/plain", Content: []byte("x"),
+		}},
+	}, Account{Address: "alice@inxt.eu"}, nil)
+	if err == nil {
+		t.Fatal("expected the failed upload to stop the send")
+	}
+	if client.sendCalled {
+		t.Error("the email was sent even though its attachment never made it")
+	}
+}
+
+// TestSendEmailWithoutAttachmentsUploadsNothing keeps ordinary mail off the
+// upload endpoint.
+func TestSendEmailWithoutAttachmentsUploadsNothing(t *testing.T) {
+	publicKey := testRecipientPublicKeyBase64(t)
+	client := &fakeClient{
+		recipientKeys: []api.RecipientKeyDto{{Address: "bob@inxt.eu", PublicKey: &publicKey}},
+	}
+
+	err := SendEmail(context.Background(), client, "tok", OutgoingMessage{
+		Subject:  "hola",
+		TextBody: "cuerpo",
+		To:       []api.EmailAddressDto{addr("bob@inxt.eu")},
+	}, Account{Address: "alice@inxt.eu"}, nil)
+	if err != nil {
+		t.Fatalf("SendEmail: %v", err)
+	}
+
+	if len(client.uploaded) != 0 {
+		t.Errorf("uploaded %d attachments, want none", len(client.uploaded))
+	}
+	if client.sentEmail.Attachments != nil {
+		t.Error("an email with no attachments should not reference any")
 	}
 }
 
