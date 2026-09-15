@@ -16,10 +16,11 @@ import (
 // fixture. The caller wraps it in whatever factory signature its server
 // expects; the connector itself does not need a session or credentials, so it
 // takes none.
-func New(service MailService, log *logger.Logger) connector.Connector {
+func New(service MailService, log *logger.Logger, sync SyncEvents) connector.Connector {
 	return &MailConnector{
 		service:      service,
 		log:          log,
+		sync:         sync,
 		updates:      make(chan imap.Update, updateBufferSize),
 		mailboxTypes: make(map[imap.MailboxID]api.Mailbox),
 		messages:     make(map[string]messageState),
@@ -77,14 +78,25 @@ func (c *MailConnector) Sync(ctx context.Context) error {
 	}
 
 	seen := make(map[string]messageState)
+	work := make([]mailboxWork, 0, len(mailboxes))
 	complete := true
 
+	// Every folder is listed before any body is downloaded, so the total the
+	// parent is shown covers the whole sync rather than one folder at a time.
 	for _, mailbox := range mailboxes {
-		if err := c.syncMailbox(ctx, mailbox, seen); err != nil {
+		created, err := c.scanMailbox(ctx, mailbox, seen)
+		if err != nil {
 			c.log.Warn("skipping mailbox %s: %v", mailbox.Name, err)
 			complete = false
 			continue
 		}
+		if len(created) > 0 {
+			work = append(work, mailboxWork{mailbox: mailbox, created: created})
+		}
+	}
+
+	if err := c.downloadNewMessages(ctx, work); err != nil {
+		return err
 	}
 
 	c.rememberMessages(seen)
@@ -113,7 +125,7 @@ func (c *MailConnector) forgetDeleted(seen map[string]messageState) {
 }
 
 // announceNewMessages announces messages Gluon has never seen, fetching their bodies.
-func (c *MailConnector) announceNewMessages(ctx context.Context, mailbox api.MailboxResponseDto, summaries []api.EmailSummaryResponseDto) error {
+func (c *MailConnector) announceNewMessages(ctx context.Context, mailbox api.MailboxResponseDto, summaries []api.EmailSummaryResponseDto, progress *progressReporter) error {
 	if len(summaries) == 0 {
 		return nil
 	}
@@ -132,6 +144,8 @@ func (c *MailConnector) announceNewMessages(ctx context.Context, mailbox api.Mai
 			}
 
 			literals[i] = literal
+
+			progress.advance()
 			return nil
 		})
 	}
@@ -160,8 +174,9 @@ func (c *MailConnector) announceNewMessages(ctx context.Context, mailbox api.Mai
 	return nil
 }
 
-// syncMailbox announces one folder and reconciles the messages it holds.
-func (c *MailConnector) syncMailbox(ctx context.Context, mailbox api.MailboxResponseDto, seen map[string]messageState) error {
+// scanMailbox announces one folder and reconciles the messages it holds,
+// returning the ones whose bodies still have to be downloaded.
+func (c *MailConnector) scanMailbox(ctx context.Context, mailbox api.MailboxResponseDto, seen map[string]messageState) ([]api.EmailSummaryResponseDto, error) {
 	// A folder is announced once. Gluon ignores a repeat, but a sync on a timer
 	// would otherwise send one per folder per cycle for nothing.
 	if !c.knownMailbox(imap.MailboxID(mailbox.Id)) {
@@ -174,7 +189,7 @@ func (c *MailConnector) syncMailbox(ctx context.Context, mailbox api.MailboxResp
 		Limit:   listEmailsLimit,
 	})
 	if err != nil {
-		return fmt.Errorf("list emails: %w", err)
+		return nil, fmt.Errorf("list emails: %w", err)
 	}
 
 	var created []api.EmailSummaryResponseDto
@@ -197,10 +212,29 @@ func (c *MailConnector) syncMailbox(ctx context.Context, mailbox api.MailboxResp
 		}
 	}
 
-	if err := c.announceNewMessages(ctx, mailbox, created); err != nil {
-		return err
+	c.log.Info("synced %s: %d messages, %d new", mailbox.Name, len(summaries), len(created))
+	return created, nil
+}
+
+// downloadNewMessages fetches the bodies of everything the scan found new,
+// reporting progress against the total across every folder.
+func (c *MailConnector) downloadNewMessages(ctx context.Context, work []mailboxWork) error {
+	var total int
+	for _, mailbox := range work {
+		total += len(mailbox.created)
 	}
 
-	c.log.Info("synced %s: %d messages, %d new", mailbox.Name, len(summaries), len(created))
+	progress := newProgressReporter(c.sync, total)
+
+	var failure string
+	defer func() { progress.finish(failure) }()
+
+	for _, mailbox := range work {
+		if err := c.announceNewMessages(ctx, mailbox.mailbox, mailbox.created, progress); err != nil {
+			failure = "fetch_bodies"
+			return err
+		}
+	}
+
 	return nil
 }

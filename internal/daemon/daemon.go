@@ -50,7 +50,7 @@ func Run(ctx context.Context, options Options) error {
 		log.Warn("serving fixture mail: %v", serviceErr)
 	}
 
-	imapService, err := startIMAP(ctx, options, session, service)
+	imapService, err := startIMAP(ctx, options, session, service, controlClient)
 	if err != nil {
 		_ = controlClient.SendError("", "start_imap")
 		return err
@@ -76,6 +76,10 @@ func Run(ctx context.Context, options Options) error {
 
 	reportStarted()
 
+	// The first sync runs now that the parent knows the bridge is up, so the
+	// progress it reports arrives after the readiness it belongs to.
+	imapService.Resync()
+
 	// From here the parent may ask for a resync at any time. Reading runs in
 	// the background so shutdown still waits on ctx rather than on the parent
 	// sending something.
@@ -91,7 +95,7 @@ func Run(ctx context.Context, options Options) error {
 	return shutdownServices(imapService, smtpService)
 }
 
-func startIMAP(ctx context.Context, options Options, session control.Session, service *mail.MailService) (*imapserver.IMAPServer, error) {
+func startIMAP(ctx context.Context, options Options, session control.Session, service *mail.MailService, controlClient *control.Client) (*imapserver.IMAPServer, error) {
 	passphrase, err := storagePassphrase(options.StateDir)
 	if err != nil {
 		return nil, fmt.Errorf("start IMAP: %w", err)
@@ -108,7 +112,7 @@ func startIMAP(ctx context.Context, options Options, session control.Session, se
 			Password: session.MailClient.Password,
 		},
 		StoragePassphrase: passphrase,
-		ConnectorFactory:  connectorFactory(service),
+		ConnectorFactory:  connectorFactory(service, controlClient),
 		StoreBuilder:      attachmentStoreBuilder(service),
 		LogProtocol:       options.Config.LogImapProtocol,
 		PollInterval:      mailconnector.DefaultPollInterval,
@@ -121,7 +125,7 @@ func startIMAP(ctx context.Context, options Options, session control.Session, se
 
 // connectorFactory serves the account's own mail, falling back to a fixture
 // mailbox when the Mail API is not reachable.
-func connectorFactory(service *mail.MailService) imapserver.ConnectorFactory {
+func connectorFactory(service *mail.MailService, controlClient *control.Client) imapserver.ConnectorFactory {
 	if service == nil {
 		return imapserver.NewDevelopmentConnectorFactory([][]byte{
 			[]byte("From: welcome@example.test\r\nTo: user@example.test\r\nSubject: Mail Bridge development server\r\n\r\nThe IMAP server is serving this local fixture message.\r\n"),
@@ -130,7 +134,40 @@ func connectorFactory(service *mail.MailService) imapserver.ConnectorFactory {
 
 	imapLog := logger.New("imap")
 	return func(ctx context.Context, _ imapserver.UnlockedSession, _ imapserver.Credentials) (connector.Connector, error) {
-		return mailconnector.New(service, imapLog), nil
+		return mailconnector.New(service, imapLog, syncEvents(controlClient, imapLog)), nil
+	}
+}
+
+// syncEvents forwards a sync's progress to the parent. A report the control
+// channel will not take is not worth failing a sync over: the mail still
+// arrives, and the parent catches up on the next one.
+func syncEvents(controlClient *control.Client, log *logger.Logger) mailconnector.SyncEvents {
+	return mailconnector.SyncEvents{
+		OnStarted: func(total int) {
+			if err := controlClient.SendSyncStarted(control.SyncStarted{Total: total}); err != nil {
+				log.Warn("could not report the sync starting: %v", err)
+			}
+		},
+		OnProgress: func(done, total, percent int) {
+			err := controlClient.SendSyncProgress(control.SyncProgress{
+				Downloaded: done,
+				Total:      total,
+				Percent:    percent,
+			})
+			if err != nil {
+				log.Warn("could not report sync progress: %v", err)
+			}
+		},
+		OnFinished: func(done, total int, code string) {
+			err := controlClient.SendSyncFinished(control.SyncFinished{
+				Downloaded: done,
+				Total:      total,
+				Code:       code,
+			})
+			if err != nil {
+				log.Warn("could not report the sync finishing: %v", err)
+			}
+		},
 	}
 }
 

@@ -108,6 +108,93 @@ func TestSyncIsQuietWhenNothingChanged(t *testing.T) {
 	}
 }
 
+// TestSyncCountsProgressAcrossFolders is why the sync lists every folder
+// before downloading any body: a message in the second folder has to be part
+// of the total reported while the first folder is still downloading.
+func TestSyncCountsProgressAcrossFolders(t *testing.T) {
+	service := syncService(summary("M1", "a"), summary("M2", "a"))
+	service.mailboxes = append(service.mailboxes, sentMailbox())
+	service.summaries[api.MailboxSent] = []api.EmailSummaryResponseDto{
+		summary("M3", "e"), summary("M4", "e"),
+	}
+
+	var recorded recorder
+	c := testConnector(service)
+	c.sync = recorded.events()
+
+	if err := c.Sync(context.Background()); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+
+	reports := recorded.all()
+	if len(reports) == 0 {
+		t.Fatal("the sync reported no progress at all")
+	}
+	for _, report := range reports {
+		if report[1] != 4 {
+			t.Errorf("reported a total of %d, want 4: the folders were not counted together", report[1])
+		}
+	}
+	if want := [3]int{4, 4, 100}; reports[len(reports)-1] != want {
+		t.Errorf("last report is %v, want %v", reports[len(reports)-1], want)
+	}
+}
+
+// TestSyncBracketsItsProgress is the cycle a parent draws a bar from: the
+// total up front, progress as it goes, and a close that says it is over.
+// Without the close, a bar has no way of knowing the sync ended.
+func TestSyncBracketsItsProgress(t *testing.T) {
+	service := syncService(summary("M1", "a"), summary("M2", "a"))
+
+	var recorded recorder
+	c := testConnector(service)
+	c.sync = recorded.events()
+
+	if err := c.Sync(context.Background()); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+
+	if starts := recorded.allStarts(); len(starts) != 1 || starts[0] != 2 {
+		t.Fatalf("starts = %v, want one start of 2", starts)
+	}
+	if got := len(recorded.all()); got == 0 {
+		t.Error("the sync reported no progress")
+	}
+
+	finishes := recorded.allFinishes()
+	if len(finishes) != 1 {
+		t.Fatalf("got %d finishes, want 1", len(finishes))
+	}
+	if want := (finish{done: 2, total: 2}); finishes[0] != want {
+		t.Errorf("finished with %+v, want %+v", finishes[0], want)
+	}
+}
+
+// TestSyncReportsNoProgressWhenNothingIsNew keeps a quiet poll quiet: with no
+// bodies to download the parent hears nothing, rather than a burst of 100%.
+func TestSyncReportsNoProgressWhenNothingIsNew(t *testing.T) {
+	service := syncService(summary("M1", "a"))
+	ctx := context.Background()
+
+	var recorded recorder
+	c := testConnector(service)
+	c.sync = recorded.events()
+
+	if err := c.Sync(ctx); err != nil {
+		t.Fatalf("first Sync: %v", err)
+	}
+	drainUpdates(c)
+	reportedFirst := len(recorded.all())
+
+	if err := c.Sync(ctx); err != nil {
+		t.Fatalf("second Sync: %v", err)
+	}
+
+	if got := len(recorded.all()); got != reportedFirst {
+		t.Errorf("the second sync reported %d times, want none", got-reportedFirst)
+	}
+}
+
 // TestSyncReportsMailReadElsewhere covers a change made in the web client: the
 // flag is updated without the body being fetched again.
 func TestSyncReportsMailReadElsewhere(t *testing.T) {

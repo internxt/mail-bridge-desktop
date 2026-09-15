@@ -49,12 +49,24 @@ func Start(ctx context.Context, session UnlockedSession, config Config) (*IMAPSe
 		return nil, err
 	}
 
-	// Polling starts only once the server is up, and only for a connector that
-	// can synchronise. An interval of zero leaves the mailbox as the first sync
-	// left it, which is what tests want.
+	// Polling starts only once the server is listening, and only for a
+	// connector that can synchronise.
+	//
+	// The first sync is left to the caller, through Resync: it reports its
+	// progress to the parent, which should hear the bridge is ready before it
+	// hears how far along a sync is. An interval of zero has no poller to ask,
+	// so it syncs here and stays as that sync left it, which is what tests
+	// want.
 	var pollers *mailconnector.Poller
-	if syncer != nil && config.PollInterval > 0 {
+	switch {
+	case syncer == nil:
+	case config.PollInterval > 0:
 		pollers = mailconnector.StartPolling(ctx, syncer, config.PollInterval, logger.New("imap"))
+	default:
+		if err := syncer.Sync(ctx); err != nil {
+			stopServing()
+			return nil, fmt.Errorf("perform initial mailbox sync: %w", err)
+		}
 	}
 
 	return &IMAPServer{
@@ -161,9 +173,6 @@ func connectMailbox(ctx context.Context, gluonServer *gluon.Server, session Unlo
 		return nil, nil
 	}
 
-	if err := syncer.Sync(ctx); err != nil {
-		return nil, fmt.Errorf("perform initial mailbox sync: %w", err)
-	}
 	return syncer, nil
 }
 

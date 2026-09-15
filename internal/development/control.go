@@ -27,12 +27,44 @@ const (
 	readyType        = "ready"
 	errorType        = "error"
 	resyncType       = "resync"
+	syncStartedType  = "sync_started"
+	syncProgressType = "sync_progress"
+	syncFinishedType = "sync_finished"
 )
 
 // SendResync asks the bridge to bring the account up to date now, the way the
 // real parent does when it learns the account changed elsewhere.
 func SendResync(ctx context.Context, connection net.Conn) error {
 	return control.WriteMessage(ctx, connection, control.Message{Type: resyncType})
+}
+
+// ReportProgress prints what the bridge reports while it downloads new mail,
+// standing in for the progress a real parent would draw. It returns when the
+// bridge stops talking, which is how this command notices it went away.
+func ReportProgress(ctx context.Context, connection net.Conn) error {
+	for {
+		message, err := control.ReadMessage(ctx, connection)
+		if err != nil {
+			return err
+		}
+
+		switch {
+		case message.Type == syncStartedType && message.Started != nil:
+			fmt.Printf("Sync started: %d emails to download\n", message.Started.Total)
+
+		case message.Type == syncProgressType && message.Progress != nil:
+			fmt.Printf("  %d%% (%d of %d emails)\n",
+				message.Progress.Percent, message.Progress.Downloaded, message.Progress.Total)
+
+		case message.Type == syncFinishedType && message.Finished != nil:
+			if message.Finished.Code != "" {
+				fmt.Printf("Sync gave up after %d of %d emails: %s\n",
+					message.Finished.Downloaded, message.Finished.Total, message.Finished.Code)
+				continue
+			}
+			fmt.Printf("Sync finished: %d emails\n", message.Finished.Downloaded)
+		}
+	}
 }
 
 // Serve waits for one bridge to connect, hands it the session, and returns the
