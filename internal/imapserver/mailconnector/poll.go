@@ -58,7 +58,7 @@ func (p *Poller) run(ctx context.Context) {
 			return
 
 		case <-p.reset:
-			p.syncOnce(ctx)
+			p.syncOnce(withRequestedSync(ctx))
 			ticker.Reset(p.interval)
 
 		case <-ticker.C:

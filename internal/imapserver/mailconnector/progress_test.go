@@ -1,6 +1,7 @@
 package mailconnector
 
 import (
+	"context"
 	"sync"
 	"testing"
 	"time"
@@ -80,7 +81,7 @@ func TestNewProgressReporterOnNothingToReport(t *testing.T) {
 		{"nobody listening", nil, 5},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			p := newProgressReporter(SyncEvents{OnProgress: tc.report}, tc.total)
+			p := newProgressReporter(context.Background(), SyncEvents{OnProgress: tc.report}, tc.total)
 			if p != nil {
 				t.Fatalf("got %v, want nil", p)
 			}
@@ -92,7 +93,7 @@ func TestNewProgressReporterOnNothingToReport(t *testing.T) {
 func TestProgressReporterReportsTheFirstAdvance(t *testing.T) {
 	var recorded recorder
 
-	p := newProgressReporter(SyncEvents{OnProgress: recorded.record}, 10)
+	p := newProgressReporter(context.Background(), SyncEvents{OnProgress: recorded.record}, 10)
 	p.advance()
 
 	reports := recorded.all()
@@ -109,7 +110,7 @@ func TestProgressReporterReportsTheFirstAdvance(t *testing.T) {
 func TestProgressReporterThrottles(t *testing.T) {
 	var recorded recorder
 
-	p := newProgressReporter(SyncEvents{OnProgress: recorded.record}, 100)
+	p := newProgressReporter(context.Background(), SyncEvents{OnProgress: recorded.record}, 100)
 	for i := 0; i < 50; i++ {
 		p.advance()
 	}
@@ -135,7 +136,7 @@ func TestProgressReporterThrottles(t *testing.T) {
 func TestProgressReporterAlwaysReportsTheLast(t *testing.T) {
 	var recorded recorder
 
-	p := newProgressReporter(SyncEvents{OnProgress: recorded.record}, 4)
+	p := newProgressReporter(context.Background(), SyncEvents{OnProgress: recorded.record}, 4)
 	for i := 0; i < 4; i++ {
 		p.advance()
 	}
@@ -156,7 +157,7 @@ func TestProgressReporterUnderConcurrentAdvances(t *testing.T) {
 		total     = fetchBodyConcurrency * perWorker
 	)
 
-	p := newProgressReporter(SyncEvents{OnProgress: recorded.record}, total)
+	p := newProgressReporter(context.Background(), SyncEvents{OnProgress: recorded.record}, total)
 
 	var workers sync.WaitGroup
 	for i := 0; i < fetchBodyConcurrency; i++ {
@@ -199,7 +200,7 @@ func TestProgressReporterUnderConcurrentAdvances(t *testing.T) {
 func TestProgressReporterStartsBeforeTheFirstDownload(t *testing.T) {
 	var recorded recorder
 
-	p := newProgressReporter(recorded.events(), 12)
+	p := newProgressReporter(context.Background(), recorded.events(), 12)
 
 	starts := recorded.allStarts()
 	if len(starts) != 1 {
@@ -216,12 +217,13 @@ func TestProgressReporterStartsBeforeTheFirstDownload(t *testing.T) {
 	p.finish("")
 }
 
-// TestProgressReporterOnNothingToReportStaysSilent covers all three events at
-// once: no new mail means no start, no progress and no finish.
-func TestProgressReporterOnNothingToReportStaysSilent(t *testing.T) {
+// TestProgressReporterOnATimerWithNothingToReport is what keeps the parent
+// from blinking every interval: a sync nobody asked for and that found nothing
+// says nothing at all.
+func TestProgressReporterOnATimerWithNothingToReport(t *testing.T) {
 	var recorded recorder
 
-	p := newProgressReporter(recorded.events(), 0)
+	p := newProgressReporter(context.Background(), recorded.events(), 0)
 	p.advance()
 	p.finish("")
 
@@ -236,13 +238,33 @@ func TestProgressReporterOnNothingToReportStaysSilent(t *testing.T) {
 	}
 }
 
+// TestProgressReporterOnRequestWithNothingToReport is the other half: somebody
+// asked for this sync and is waiting to see it happen, so it opens and closes
+// even with nothing to download.
+func TestProgressReporterOnRequestWithNothingToReport(t *testing.T) {
+	var recorded recorder
+
+	p := newProgressReporter(withRequestedSync(context.Background()), recorded.events(), 0)
+	p.finish("")
+
+	if starts := recorded.allStarts(); len(starts) != 1 || starts[0] != 0 {
+		t.Fatalf("starts = %v, want one start of 0", starts)
+	}
+	if got := len(recorded.all()); got != 0 {
+		t.Errorf("got %d reports with nothing to download, want none", got)
+	}
+	if finishes := recorded.allFinishes(); len(finishes) != 1 || finishes[0] != (finish{}) {
+		t.Errorf("finishes = %+v, want one empty finish", finishes)
+	}
+}
+
 // TestProgressReporterFinishReportsHowFarItGot is the answer to "how does the
 // parent know it is over": a sync that gave up halfway still closes, with the
 // count it reached and why it stopped.
 func TestProgressReporterFinishReportsHowFarItGot(t *testing.T) {
 	var recorded recorder
 
-	p := newProgressReporter(recorded.events(), 10)
+	p := newProgressReporter(context.Background(), recorded.events(), 10)
 	p.advance()
 	p.advance()
 	p.finish("fetch_bodies")
@@ -259,7 +281,7 @@ func TestProgressReporterFinishReportsHowFarItGot(t *testing.T) {
 func TestProgressReporterFinishOnSuccessCarriesNoCode(t *testing.T) {
 	var recorded recorder
 
-	p := newProgressReporter(recorded.events(), 2)
+	p := newProgressReporter(context.Background(), recorded.events(), 2)
 	p.advance()
 	p.advance()
 	p.finish("")

@@ -224,7 +224,7 @@ func (c *MailConnector) downloadNewMessages(ctx context.Context, work []mailboxW
 		total += len(mailbox.created)
 	}
 
-	progress := newProgressReporter(c.sync, total)
+	progress := newProgressReporter(ctx, c.sync, total)
 
 	var failure string
 	defer func() { progress.finish(failure) }()

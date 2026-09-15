@@ -134,21 +134,23 @@ func connectorFactory(service *mail.MailService, controlClient *control.Client) 
 
 	imapLog := logger.New("imap")
 	return func(ctx context.Context, _ imapserver.UnlockedSession, _ imapserver.Credentials) (connector.Connector, error) {
-		return mailconnector.New(service, imapLog, syncEvents(controlClient, imapLog)), nil
+		return mailconnector.New(service, imapLog, syncProgressEvents(controlClient, imapLog)), nil
 	}
 }
 
-// syncEvents forwards a sync's progress to the parent. A report the control
+// syncProgressEvents forwards a sync's progress to the parent. A report the control
 // channel will not take is not worth failing a sync over: the mail still
 // arrives, and the parent catches up on the next one.
-func syncEvents(controlClient *control.Client, log *logger.Logger) mailconnector.SyncEvents {
+func syncProgressEvents(controlClient *control.Client, log *logger.Logger) mailconnector.SyncEvents {
 	return mailconnector.SyncEvents{
 		OnStarted: func(total int) {
+			log.Info("[SYNC_STARTED]: %d messages", total)
 			if err := controlClient.SendSyncStarted(control.SyncStarted{Total: total}); err != nil {
 				log.Warn("could not report the sync starting: %v", err)
 			}
 		},
 		OnProgress: func(done, total, percent int) {
+			log.Info("[SYNC_PROGRESS]: %d/%d (%d%%)", done, total, percent)
 			err := controlClient.SendSyncProgress(control.SyncProgress{
 				Downloaded: done,
 				Total:      total,
@@ -159,6 +161,7 @@ func syncEvents(controlClient *control.Client, log *logger.Logger) mailconnector
 			}
 		},
 		OnFinished: func(done, total int, code string) {
+			log.Info("[SYNC_FINISHED]: %d/%d %s", done, total, code)
 			err := controlClient.SendSyncFinished(control.SyncFinished{
 				Downloaded: done,
 				Total:      total,

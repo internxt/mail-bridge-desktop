@@ -1,6 +1,7 @@
 package mailconnector
 
 import (
+	"context"
 	"sync"
 	"time"
 )
@@ -17,11 +18,27 @@ type progressReporter struct {
 	lastReport time.Time
 }
 
-// newProgressReporter returns nil when there is nothing to report: no listener,
-// or no new mail. A nil reporter's methods do nothing, which is what keeps a
-// quiet poll quiet without the caller having to check.
-func newProgressReporter(events SyncEvents, total int) *progressReporter {
-	if events.OnProgress == nil || total <= 0 {
+type requestedSyncKey struct{}
+
+// withRequestedSync marks a sync as asked for, so it reports even when it
+// turns out there is nothing to download.
+func withRequestedSync(ctx context.Context) context.Context {
+	return context.WithValue(ctx, requestedSyncKey{}, true)
+}
+
+func isRequestedSync(ctx context.Context) bool {
+	requested, _ := ctx.Value(requestedSyncKey{}).(bool)
+	return requested
+}
+
+// newProgressReporter returns nil when there is nothing worth reporting, and a
+// nil reporter's methods do nothing — which is what keeps a quiet poll quiet
+// without the caller having to check.
+func newProgressReporter(ctx context.Context, events SyncEvents, total int) *progressReporter {
+	if events.OnProgress == nil {
+		return nil
+	}
+	if total <= 0 && !isRequestedSync(ctx) {
 		return nil
 	}
 

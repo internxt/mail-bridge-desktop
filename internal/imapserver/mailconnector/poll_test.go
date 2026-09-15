@@ -205,3 +205,46 @@ func TestResyncOnNothing(t *testing.T) {
 	var p *Poller
 	p.Resync()
 }
+
+// TestResyncMarksTheSyncAsRequested is what lets a sync somebody asked for
+// report itself even when it finds nothing: whoever asked is waiting to see
+// that it happened, while a sync the timer started stays quiet.
+func TestResyncMarksTheSyncAsRequested(t *testing.T) {
+	syncer := &recordingSyncer{started: make(chan bool, 4)}
+
+	p := StartPolling(context.Background(), syncer, 20*time.Millisecond, logger.New("test"))
+	defer p.Stop()
+
+	p.Resync()
+	select {
+	case requested := <-syncer.started:
+		if !requested {
+			t.Error("a requested sync did not say so")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the request did not run a cycle")
+	}
+
+	select {
+	case requested := <-syncer.started:
+		if requested {
+			t.Error("a sync the timer started claimed to have been requested")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no cycle ran on the interval")
+	}
+}
+
+// recordingSyncer reports whether each cycle was asked for or came off the
+// timer.
+type recordingSyncer struct {
+	started chan bool
+}
+
+func (s *recordingSyncer) Sync(ctx context.Context) error {
+	select {
+	case s.started <- isRequestedSync(ctx):
+	default:
+	}
+	return nil
+}
