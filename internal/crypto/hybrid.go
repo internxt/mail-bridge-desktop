@@ -21,6 +21,9 @@ const (
 	hybridPublicKeyLen = mlkemPublicKeyLen + x25519PublicKeyLen
 )
 
+const PublicKeyLen = hybridPublicKeyLen
+const PrivateKeyLen = x25519KeyLen
+
 const combinerLabel = `\.//^\`
 
 // xwingKEM is the X-Wing hybrid KEM: ML-KEM-768 combined with X25519 so that

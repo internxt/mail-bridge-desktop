@@ -107,21 +107,3 @@ func TestReplyEmailPostsToTheParentsReplyPath(t *testing.T) {
 		t.Errorf("id = %q, want M2", res.Id)
 	}
 }
-
-func TestGetMailAccountKeysDecodesResponse(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if got := r.URL.Path; got != "/users/me/mail-account/keys" {
-			t.Errorf("path = %q, want /users/me/mail-account/keys", got)
-		}
-		w.Write([]byte(`{"address":"alice@inxt.eu","encryptionPrivateKey":"enc","publicKey":"pub","recoveryPrivateKey":"rec"}`))
-	}))
-	defer srv.Close()
-
-	keys, err := newTestClient(t, srv).GetMailAccountKeys(context.Background(), "tok")
-	if err != nil {
-		t.Fatalf("GetMailAccountKeys: %v", err)
-	}
-	if keys.PublicKey != "pub" {
-		t.Errorf("public key = %q, want pub", keys.PublicKey)
-	}
-}

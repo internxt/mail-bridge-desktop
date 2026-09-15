@@ -11,6 +11,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"flag"
 	"fmt"
@@ -64,8 +65,27 @@ func run(context context.Context, endpoint, stateDir string) error {
 
 	development.ReportConnectionSettings(session, ready)
 
+	go resyncOnEnter(context, connection)
+
 	<-context.Done()
 	return nil
+}
+
+// resyncOnEnter sends a resync every time Enter is pressed, standing in for
+// whatever makes the real parent ask for one.
+func resyncOnEnter(ctx context.Context, connection net.Conn) {
+	scanner := bufio.NewScanner(os.Stdin)
+
+	for scanner.Scan() {
+		if ctx.Err() != nil {
+			return
+		}
+		if err := development.SendResync(ctx, connection); err != nil {
+			fmt.Fprintln(os.Stderr, "devcontrol: send resync:", err)
+			return
+		}
+		fmt.Println("Asked the bridge to resync.")
+	}
 }
 
 // listen creates the endpoint, removing a socket left behind by a previous run.

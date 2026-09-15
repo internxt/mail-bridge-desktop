@@ -6,6 +6,7 @@ const (
 	startSessionType  = "start_session"
 	readyType         = "ready"
 	sessionUpdateType = "session_updated"
+	resyncType        = "resync"
 	ackType           = "ack"
 	errorType         = "error"
 )

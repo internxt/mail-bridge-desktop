@@ -16,6 +16,7 @@ import (
 
 	"mail-bridge-desktop/internal/api"
 	"mail-bridge-desktop/internal/control"
+	"mail-bridge-desktop/internal/crypto"
 	"mail-bridge-desktop/internal/imapserver"
 	"mail-bridge-desktop/internal/imapserver/attachmentstore"
 	"mail-bridge-desktop/internal/imapserver/mailconnector"
@@ -74,6 +75,17 @@ func Run(ctx context.Context, options Options) error {
 	}
 
 	reportStarted()
+
+	// From here the parent may ask for a resync at any time. Reading runs in
+	// the background so shutdown still waits on ctx rather than on the parent
+	// sending something.
+	go func() {
+		err := controlClient.Serve(ctx, control.Events{OnResync: imapService.Resync})
+		if err != nil && ctx.Err() == nil {
+			log.Warn("no longer listening to the parent: %v", err)
+		}
+	}()
+
 	<-ctx.Done()
 
 	return shutdownServices(imapService, smtpService)
@@ -160,31 +172,31 @@ func mailService(ctx context.Context, options Options, session control.Session, 
 	service := mail.New(client, mail.Account{
 		Token:      backend.Token,
 		Address:    session.Addresses[0],
-		PrivateKey: encryptionKey(backend.EncryptionPrivateKey, log),
+		PrivateKey: decodeKey(backend.EncryptionPrivateKey, crypto.PrivateKeyLen, "private", log),
+		PublicKey:  decodeKey(backend.EncryptionPublicKey, crypto.PublicKeyLen, "public", log),
 	}, options.Config.ServerPublicKey, log)
-
-	if err := service.Init(ctx); err != nil {
-		log.Warn("sending mail will not be readable in Sent: %v", err)
-	}
 
 	return service, nil
 }
 
-const privateKeyLen = 32
-
-// We need to decode the base64 encryption key
-func encryptionKey(encoded string, log *logger.Logger) []byte {
+// decodeKey decodes one of the account's base64 keys.
+//
+// The two have different sizes — the private key is a 32-byte seed, the public key is
+// 1216 bytes of ML-KEM-768 followed by X25519 — so the expected length is a parameter.
+// Validating the public key against the private one's size silently dropped it and left
+// outgoing mail unsealable.
+func decodeKey(encoded string, want int, kind string, log *logger.Logger) []byte {
 	if encoded == "" {
 		return nil
 	}
 
 	key, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
-		log.Warn("serving mail undecrypted: decode encryption private key: %v", err)
+		log.Warn("serving mail undecrypted: decode encryption %s key: %v", kind, err)
 		return nil
 	}
-	if len(key) != privateKeyLen {
-		log.Warn("serving mail undecrypted: encryption private key is %d bytes, want %d", len(key), privateKeyLen)
+	if len(key) != want {
+		log.Warn("serving mail undecrypted: encryption %s key is %d bytes, want %d", kind, len(key), want)
 		return nil
 	}
 

@@ -32,7 +32,7 @@ func SessionFromEnv(stateDir string) (control.Session, error) {
 	backend, err := json.Marshal(control.BackendSession{
 		Token:                os.Getenv("BRIDGE_DEV_TOKEN"),
 		EncryptionPrivateKey: os.Getenv("BRIDGE_DEV_ENCRYPTION_PRIVATE_KEY"),
-		PublicKey:            os.Getenv("BRIDGE_DEV_PUBLIC_KEY"),
+		EncryptionPublicKey:  os.Getenv("BRIDGE_DEV_PUBLIC_KEY"),
 	})
 	if err != nil {
 		return control.Session{}, fmt.Errorf("encode backend session: %w", err)

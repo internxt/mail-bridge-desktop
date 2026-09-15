@@ -26,7 +26,14 @@ const (
 	startSessionType = "start_session"
 	readyType        = "ready"
 	errorType        = "error"
+	resyncType       = "resync"
 )
+
+// SendResync asks the bridge to bring the account up to date now, the way the
+// real parent does when it learns the account changed elsewhere.
+func SendResync(ctx context.Context, connection net.Conn) error {
+	return control.WriteMessage(ctx, connection, control.Message{Type: resyncType})
+}
 
 // Serve waits for one bridge to connect, hands it the session, and returns the
 // listener addresses the bridge reports back, along with the live connection.

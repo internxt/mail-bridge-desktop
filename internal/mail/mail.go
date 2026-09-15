@@ -10,7 +10,6 @@ package mail
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
 	"sync"
 
@@ -26,6 +25,7 @@ type Account struct {
 	Token      string
 	Address    string
 	PrivateKey []byte
+	PublicKey  []byte
 }
 
 // MailService turns an account session into Mail API calls.
@@ -36,7 +36,6 @@ type MailService struct {
 	threadsMutex    sync.Mutex
 	threads         map[string]api.EmailResponseDto
 	serverPublicKey []byte
-	ownPublicKey    []byte
 }
 
 func New(client commands.Client, account Account, serverPublicKey []byte, log *logger.Logger) *MailService {
@@ -47,23 +46,6 @@ func New(client commands.Client, account Account, serverPublicKey []byte, log *l
 		threads:         make(map[string]api.EmailResponseDto),
 		serverPublicKey: serverPublicKey,
 	}
-}
-
-// Init fetches the account's own public key, so the sender can read their
-// own Sent copy of anything they send.
-func (s *MailService) Init(ctx context.Context) error {
-	keys, err := s.api.GetMailAccountKeys(ctx, s.account.Token)
-	if err != nil {
-		return fmt.Errorf("get account keys: %w", err)
-	}
-
-	publicKey, err := base64.StdEncoding.DecodeString(keys.PublicKey)
-	if err != nil {
-		return fmt.Errorf("decode account public key: %w", err)
-	}
-
-	s.ownPublicKey = publicKey
-	return nil
 }
 
 // ForgetThreads drops the messages remembered during a sync.
@@ -250,6 +232,6 @@ func (s *MailService) decryptionAccount() commands.Account {
 	return commands.Account{
 		Address:    s.account.Address,
 		PrivateKey: s.account.PrivateKey,
-		PublicKey:  s.ownPublicKey,
+		PublicKey:  s.account.PublicKey,
 	}
 }

@@ -33,7 +33,7 @@ type MailClient struct {
 type BackendSession struct {
 	Token                string `json:"token"`
 	EncryptionPrivateKey string `json:"encryption_private_key,omitempty"`
-	PublicKey            string `json:"public_key,omitempty"`
+	EncryptionPublicKey  string `json:"encryption_public_key,omitempty"`
 }
 
 // Ready reports the actual local listener addresses after the bridge binds
