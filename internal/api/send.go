@@ -6,9 +6,8 @@ import (
 )
 
 const (
-	emailSendPath           = emailPath + "/send"
-	emailKeysLookupPath     = emailPath + "/keys/lookup"
-	userMailAccountKeysPath = "/users/me/mail-account/keys"
+	emailSendPath       = emailPath + "/send"
+	emailKeysLookupPath = emailPath + "/keys/lookup"
 )
 
 // LookupRecipientKeys returns each address's public encryption key, or a nil
@@ -54,21 +53,6 @@ func (c *Client) ReplyEmail(ctx context.Context, token, emailID string, reply Re
 		path:   emailPath + "/" + escapeID(emailID) + "/reply",
 		token:  token,
 		body:   reply,
-	}, &res)
-
-	return res, err
-}
-
-// GetMailAccountKeys returns the caller's own encryption keys, including the
-// public key a sender seals their own Sent copy with.
-func (c *Client) GetMailAccountKeys(ctx context.Context, token string) (MailAccountKeysResponseDto, error) {
-	var res MailAccountKeysResponseDto
-
-	err := c.do(ctx, request{
-		svc:    c.mail,
-		method: http.MethodGet,
-		path:   userMailAccountKeysPath,
-		token:  token,
 	}, &res)
 
 	return res, err

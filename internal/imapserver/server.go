@@ -193,6 +193,16 @@ func (s *IMAPServer) Status() Status {
 	return s.status
 }
 
+// Resync brings the mailbox up to date now and starts the polling interval
+// over. It does nothing for a server that was started without polling.
+func (s *IMAPServer) Resync() {
+	s.mutex.Lock()
+	poller := s.poller
+	s.mutex.Unlock()
+
+	poller.Resync()
+}
+
 // Errors returns asynchronous IMAP service errors.
 func (s *IMAPServer) Errors() <-chan error {
 	s.mutex.Lock()

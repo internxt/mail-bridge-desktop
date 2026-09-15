@@ -65,10 +65,6 @@ func (f *fakeClient) SendEmail(ctx context.Context, token string, email api.Send
 	return api.EmailCreatedResponseDto{}, f.err
 }
 
-func (f *fakeClient) GetMailAccountKeys(ctx context.Context, token string) (api.MailAccountKeysResponseDto, error) {
-	return api.MailAccountKeysResponseDto{}, f.err
-}
-
 func (f *fakeClient) SaveDraft(ctx context.Context, token string, draft api.DraftEmailRequestDto) (api.EmailResponseDto, error) {
 	f.savedDraft = draft
 	if f.err != nil {

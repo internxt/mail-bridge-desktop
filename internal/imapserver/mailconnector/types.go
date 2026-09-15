@@ -63,6 +63,7 @@ type Poller struct {
 	interval time.Duration
 	log      *logger.Logger
 
-	stop context.CancelFunc
-	done chan struct{}
+	reset chan struct{}
+	stop  context.CancelFunc
+	done  chan struct{}
 }

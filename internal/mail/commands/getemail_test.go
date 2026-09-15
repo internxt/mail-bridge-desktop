@@ -20,15 +20,13 @@ type fakeClient struct {
 	deleted    []string
 
 	// What SendEmail's collaborators return, and what it asked of them.
-	recipientKeys      []api.RecipientKeyDto
-	lookupErr          error
-	sendErr            error
-	sentEmail          api.SendEmailRequestDto
-	sendCalled         bool
-	repliedTo          string
-	sentReply          api.ReplyEmailRequestDto
-	mailAccountKeys    api.MailAccountKeysResponseDto
-	mailAccountKeysErr error
+	recipientKeys []api.RecipientKeyDto
+	lookupErr     error
+	sendErr       error
+	sentEmail     api.SendEmailRequestDto
+	sendCalled    bool
+	repliedTo     string
+	sentReply     api.ReplyEmailRequestDto
 
 	// What the draft commands asked for.
 	savedDraft      api.DraftEmailRequestDto
@@ -88,10 +86,6 @@ func (f *fakeClient) SendEmail(ctx context.Context, token string, email api.Send
 		return api.EmailCreatedResponseDto{}, f.sendErr
 	}
 	return api.EmailCreatedResponseDto{Id: "M1"}, nil
-}
-
-func (f *fakeClient) GetMailAccountKeys(ctx context.Context, token string) (api.MailAccountKeysResponseDto, error) {
-	return f.mailAccountKeys, f.mailAccountKeysErr
 }
 
 func (f *fakeClient) SaveDraft(ctx context.Context, token string, draft api.DraftEmailRequestDto) (api.EmailResponseDto, error) {
