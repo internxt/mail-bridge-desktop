@@ -7,6 +7,9 @@ const (
 	readyType         = "ready"
 	sessionUpdateType = "session_updated"
 	resyncType        = "resync"
+	syncStartedType   = "sync_started"
+	syncProgressType  = "sync_progress"
+	syncFinishedType  = "sync_finished"
 	ackType           = "ack"
 	errorType         = "error"
 )

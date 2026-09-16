@@ -61,6 +61,33 @@ type SessionUpdate struct {
 	BackendSession json.RawMessage `json:"backend_session"`
 }
 
+// SyncStarted opens a sync that has work to do, naming the total up front so
+// the parent can draw an empty bar before the first message is downloaded.
+type SyncStarted struct {
+	Total int `json:"total"`
+}
+
+// SyncProgress reports how far a sync has got through downloading the messages
+// it found new. It is sent only while there is mail to download, so a cycle
+// that finds nothing sends nothing.
+//
+// Percent is computed here rather than left to the parent, so every consumer
+// shows the same number.
+type SyncProgress struct {
+	Downloaded int `json:"downloaded"`
+	Total      int `json:"total"`
+	Percent    int `json:"percent"`
+}
+
+// SyncFinished closes a sync the parent was watching. It follows the last
+// SyncProgress whether the sync completed or gave up, so a bar never sits
+// part-filled waiting for an update that is not coming.
+type SyncFinished struct {
+	Downloaded int    `json:"downloaded"`
+	Total      int    `json:"total"`
+	Code       string `json:"code,omitempty"`
+}
+
 type Message struct {
 	Type      string         `json:"type"`
 	RequestID string         `json:"request_id,omitempty"`
@@ -68,6 +95,9 @@ type Message struct {
 	Ready     *Ready         `json:"ready,omitempty"`
 	Update    *SessionUpdate `json:"update,omitempty"`
 	Error     *ControlError  `json:"error,omitempty"`
+	Started   *SyncStarted   `json:"started,omitempty"`
+	Progress  *SyncProgress  `json:"progress,omitempty"`
+	Finished  *SyncFinished  `json:"finished,omitempty"`
 }
 
 type deadlineSetter interface {

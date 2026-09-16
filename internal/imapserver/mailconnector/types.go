@@ -32,6 +32,7 @@ type MailService interface {
 type MailConnector struct {
 	service MailService
 	log     *logger.Logger
+	sync    SyncEvents
 
 	updates chan imap.Update
 	// Closes the Gluon instance when the connector is closed.
@@ -40,6 +41,23 @@ type MailConnector struct {
 	mailboxTypes      map[imap.MailboxID]api.Mailbox
 	messagesMutex     sync.RWMutex
 	messages          map[string]messageState
+}
+
+// SyncEvents is what the connector reports while it downloads new mail. A nil
+// handler is not called, so a caller that wants none supplies none.
+type SyncEvents struct {
+	OnStarted  func(total int)
+	OnProgress func(done, total, percent int)
+	OnFinished func(done, total int, code string)
+}
+
+// mailboxWork is what one folder's listing found that still needs downloading.
+// Listing every folder before downloading any body is what lets a sync say how
+// many messages it is about to fetch in total, rather than only how many this
+// folder holds.
+type mailboxWork struct {
+	mailbox api.MailboxResponseDto
+	created []api.EmailSummaryResponseDto
 }
 
 // messageState is everything about a message that can change without the

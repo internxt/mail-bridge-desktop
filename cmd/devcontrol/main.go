@@ -67,6 +67,12 @@ func run(context context.Context, endpoint, stateDir string) error {
 
 	go resyncOnEnter(context, connection)
 
+	go func() {
+		if err := development.ReportProgress(context, connection); err != nil && context.Err() == nil {
+			fmt.Fprintln(os.Stderr, "devcontrol: the bridge stopped reporting:", err)
+		}
+	}()
+
 	<-context.Done()
 	return nil
 }

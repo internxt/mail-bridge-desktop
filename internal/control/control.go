@@ -55,6 +55,39 @@ func (client *Client) SendReady(ready Ready) error {
 	return client.send(context.Background(), Message{Type: readyType, Ready: &ready})
 }
 
+// SendSyncStarted opens a sync that has mail to download, so the parent can
+// show it is working before the first message arrives.
+func (client *Client) SendSyncStarted(started SyncStarted) error {
+	if started.Total <= 0 {
+		return errors.New("sync started requires a total")
+	}
+	return client.send(context.Background(), Message{
+		Type:    syncStartedType,
+		Started: &started,
+	})
+}
+
+// SendSyncProgress reports how far the current sync has got, between the
+// started and finished messages that bracket it.
+func (client *Client) SendSyncProgress(progress SyncProgress) error {
+	if progress.Total <= 0 {
+		return errors.New("sync progress requires a total")
+	}
+	return client.send(context.Background(), Message{
+		Type:     syncProgressType,
+		Progress: &progress,
+	})
+}
+
+// SendSyncFinished closes a sync the parent was watching, whether it finished
+// its work or gave up partway.
+func (client *Client) SendSyncFinished(finished SyncFinished) error {
+	return client.send(context.Background(), Message{
+		Type:     syncFinishedType,
+		Finished: &finished,
+	})
+}
+
 // SendError reports a stable non-secret error code to the parent. Detailed
 // errors stay local so control messages never accidentally expose secrets.
 func (client *Client) SendError(requestID, code string) error {
