@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"time"
 )
 
@@ -135,7 +136,11 @@ func setDeadline(ctx context.Context, value any) error {
 	if !hasDeadline {
 		return nil
 	}
-	return setter.SetDeadline(deadline)
+	err := setter.SetDeadline(deadline)
+	if errors.Is(err, os.ErrNoDeadline) {
+		return nil
+	}
+	return err
 }
 
 // clearDeadline removes the temporary deadline after one operation completes.
