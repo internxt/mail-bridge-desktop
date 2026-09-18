@@ -7,6 +7,7 @@ import (
 
 	"github.com/ProtonMail/gluon/connector"
 	"github.com/ProtonMail/gluon/imap"
+	"github.com/google/uuid"
 
 	"mail-bridge-desktop/internal/api"
 )
@@ -147,5 +148,5 @@ func (c *MailConnector) CreateMessage(ctx context.Context, mboxID imap.MailboxID
 // to be unique, since Gluon rejects an append that comes back with an ID it
 // already knows, and it must never collide with an ID the API could give out.
 func discardedMessageID() imap.MessageID {
-	return imap.MessageID(fmt.Sprintf("bridge-discarded-%d", time.Now().UnixNano()))
+	return imap.MessageID("bridge-discarded-" + uuid.NewString())
 }
