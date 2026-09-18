@@ -6,6 +6,7 @@ require (
 	github.com/ProtonMail/gluon v0.17.0
 	github.com/emersion/go-sasl v0.0.0-20241020182733-b788ff22d5a6
 	github.com/emersion/go-smtp v0.25.0
+	github.com/google/uuid v1.3.0
 	github.com/joho/godotenv v1.5.1
 	github.com/zalando/go-keyring v0.2.8
 	golang.org/x/crypto v0.55.0
@@ -18,7 +19,6 @@ require (
 	github.com/danieljoos/wincred v1.2.3 // indirect
 	github.com/emersion/go-imap v1.2.1 // indirect
 	github.com/godbus/dbus/v5 v5.2.2 // indirect
-	github.com/google/uuid v1.3.0 // indirect
 	github.com/mattn/go-sqlite3 v1.14.17 // indirect
 	github.com/pierrec/lz4/v4 v4.1.17 // indirect
 	github.com/sirupsen/logrus v1.9.0 // indirect

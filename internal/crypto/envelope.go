@@ -43,7 +43,7 @@ type Envelope struct {
 }
 
 func IsEncryptedBody(textBody string) bool {
-	return strings.HasPrefix(textBody, EncryptedEmailPrefix+"\n")
+	return strings.HasPrefix(textBody, EncryptedEmailPrefix+"\n") || strings.HasPrefix(textBody, EncryptedEmailPrefix+"\r\n")
 }
 
 func ParseEnvelope(textBody string) (Envelope, error) {
@@ -51,7 +51,9 @@ func ParseEnvelope(textBody string) (Envelope, error) {
 		return Envelope{}, errors.New("crypto: body does not carry an encrypted envelope")
 	}
 
-	payload := textBody[len(EncryptedEmailPrefix)+1:]
+	payload := strings.TrimPrefix(textBody, EncryptedEmailPrefix)
+	payload = strings.TrimPrefix(payload, "\r\n")
+	payload = strings.TrimPrefix(payload, "\n")
 	decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(payload))
 	if err != nil {
 		return Envelope{}, fmt.Errorf("crypto: decode envelope: %w", err)

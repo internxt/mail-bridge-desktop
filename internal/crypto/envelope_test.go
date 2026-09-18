@@ -226,6 +226,7 @@ func TestIsEncryptedBody(t *testing.T) {
 		want bool
 	}{
 		{"encrypted body", encryptedBody(t), true},
+		{"encrypted body with CRLF header", EncryptedEmailPrefix + "\r\n" + "payload", true},
 		{"plain text", "Hola, esto es texto plano", false},
 		{"empty", "", false},
 		{"prefix without newline", EncryptedEmailPrefix, false},
