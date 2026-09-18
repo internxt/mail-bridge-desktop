@@ -114,6 +114,16 @@ func (session Session) Backend() (BackendSession, error) {
 	return backend, nil
 }
 
+// Backend decodes the account material a session update carries, the same way Session
+// does for the opening handshake.
+func (update SessionUpdate) Backend() (BackendSession, error) {
+	var backend BackendSession
+	if err := json.Unmarshal(update.BackendSession, &backend); err != nil {
+		return BackendSession{}, fmt.Errorf("decode backend session: %w", err)
+	}
+	return backend, nil
+}
+
 // Close closes the control channel. Task 3 will also use channel closure to
 // cancel the daemon and clear its in-memory session material.
 func (client *Client) Close() error { return client.connection.Close() }

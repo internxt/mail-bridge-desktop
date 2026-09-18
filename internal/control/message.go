@@ -13,3 +13,8 @@ const (
 	ackType           = "ack"
 	errorType         = "error"
 )
+
+const (
+	malformedFrameCode   = "malformed_frame"
+	badSessionUpdateCode = "bad_session_update"
+)
