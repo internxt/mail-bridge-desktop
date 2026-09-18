@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -195,7 +196,8 @@ func TestDiskFileIsEncryptedAndPrivate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stat: %v", err)
 	}
-	if perm := info.Mode().Perm(); perm != filePerm {
+	if runtime.GOOS != "windows" && info.Mode().Perm() != filePerm {
+		perm := info.Mode().Perm()
 		t.Errorf("permissions = %v, want %v", perm, filePerm)
 	}
 

@@ -1,6 +1,17 @@
 name: Release bridge binaries
 
 on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Release tag, for example v0.0.1
+        required: true
+        type: string
+      target_ref:
+        description: Commit, branch, or SHA to build and tag
+        required: true
+        default: main
+        type: string
   push:
     tags:
       - "v*"
@@ -9,8 +20,28 @@ permissions:
   contents: read
 
 jobs:
+  prepare:
+    name: Check release state
+    runs-on: ubuntu-latest
+    outputs:
+      release_exists: ${{ steps.release.outputs.exists }}
+    steps:
+      - id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+        shell: bash
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
   build:
     name: Build ${{ matrix.target }}
+    needs: prepare
+    if: github.event_name == 'workflow_dispatch' || needs.prepare.outputs.release_exists != 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -30,6 +61,8 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.target_ref || github.ref }}
 
       - uses: actions/setup-go@v7
         with:
@@ -54,7 +87,7 @@ jobs:
           CGO_ENABLED: "1"
           GOOS: ${{ matrix.os }}
           GOARCH: ${{ matrix.arch }}
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
           TARGET_OS: ${{ matrix.os }}
           TARGET_ARCH: ${{ matrix.arch }}
         shell: bash
@@ -72,7 +105,7 @@ jobs:
           CGO_ENABLED: "1"
           GOOS: ${{ matrix.os }}
           GOARCH: ${{ matrix.arch }}
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
           TARGET_OS: ${{ matrix.os }}
           TARGET_ARCH: ${{ matrix.arch }}
         shell: pwsh
@@ -94,13 +127,16 @@ jobs:
           retention-days: 1
 
   publish:
-    name: Publish GitHub Release
-    needs: build
+    name: Create Mail Bridge release draft
+    needs: [prepare, build]
+    if: github.event_name == 'workflow_dispatch' || needs.prepare.outputs.release_exists != 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.target_ref || github.ref }}
 
       - name: Download release archives
         uses: actions/download-artifact@v4
@@ -111,7 +147,7 @@ jobs:
 
       - name: Generate manifest and checksums
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
           REPOSITORY: ${{ github.repository }}
         shell: bash
         run: |
@@ -122,12 +158,19 @@ jobs:
             "https://github.com/${REPOSITORY}/releases/download/${RELEASE_TAG}" \
             release
 
-      - name: Publish release assets
+      - name: Create draft release or upload its assets
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+          TARGET_REF: ${{ inputs.target_ref || github.ref }}
         shell: bash
         run: |
-          gh release create "$RELEASE_TAG" release/* \
-            --title "Mail Bridge $RELEASE_TAG" \
-            --generate-notes
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" release/* --clobber
+          else
+            gh release create "$RELEASE_TAG" release/* \
+              --draft \
+              --target "$TARGET_REF" \
+              --title "Mail Bridge $RELEASE_TAG" \
+              --generate-notes
+          fi

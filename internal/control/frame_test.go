@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestReadFrameRejectsOversizedFrame(t *testing.T) {
@@ -16,6 +18,16 @@ func TestReadFrameRejectsOversizedFrame(t *testing.T) {
 		t.Fatalf("expected oversized frame error, got %v", err)
 	}
 }
+
+func TestSetDeadlineIgnoresUnsupportedDeadline(t *testing.T) {
+	if err := setDeadline(context.Background(), unsupportedDeadline{}); err != nil {
+		t.Fatalf("expected unsupported deadline to be ignored, got %v", err)
+	}
+}
+
+type unsupportedDeadline struct{}
+
+func (unsupportedDeadline) SetDeadline(time.Time) error { return os.ErrNoDeadline }
 
 func TestReadMessageRejectsUnknownFields(t *testing.T) {
 	var framed bytes.Buffer
