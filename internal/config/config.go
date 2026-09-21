@@ -26,6 +26,7 @@ func Load() Config {
 		SMTPDomain:      env("BRIDGE_SMTP_DOMAIN", "localhost"),
 		MailAPI:         env("MAIL_API_URL", ""),
 		LogImapProtocol: env("BRIDGE_LOG_IMAP_PROTOCOL", "") == "true",
+		TLS:             env("BRIDGE_TLS", "") == "true",
 		ServerPublicKey: decodeServerPublicKey(env("MAIL_SERVER_PUBLIC_KEY", "")),
 	}
 }

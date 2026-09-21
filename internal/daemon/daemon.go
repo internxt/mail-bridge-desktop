@@ -52,9 +52,13 @@ func Run(ctx context.Context, options Options) error {
 		log.Warn("serving fixture mail: %v", serviceErr)
 	}
 
-	tlsConfig, certificate, err := localTLS(options.StateDir)
-	if err != nil {
-		log.Warn("serving without TLS, mail clients will refuse to send a password: %v", err)
+	var tlsConfig *tls.Config
+	var certificate []byte
+
+	if options.Config.TLS {
+		if tlsConfig, certificate, err = localTLS(options.StateDir); err != nil {
+			log.Warn("serving without TLS, mail clients will refuse to send a password: %v", err)
+		}
 	}
 
 	imapService, err := startIMAP(ctx, options, session, service, controlClient, tlsConfig)

@@ -22,3 +22,23 @@ func TestLoadUsesBridgeHost(t *testing.T) {
 		t.Fatalf("SMTPDomain = %q, want bridge.test", cfg.SMTPDomain)
 	}
 }
+
+// TestLoadKeepsTLSOffUnlessAsked matters because this daemon is shared: the Windows and
+// Linux apps run it too, and they have no way yet to make their system trust the
+// certificate it would serve. Defaulting to on would hand their users a warning, and
+// withdraw SMTP AUTH from the clients they already have configured.
+func TestLoadKeepsTLSOffUnlessAsked(t *testing.T) {
+	if cfg := Load(); cfg.TLS {
+		t.Error("TLS is on with no BRIDGE_TLS set; a parent that never asked would start serving a certificate")
+	}
+
+	t.Setenv("BRIDGE_TLS", "true")
+	if cfg := Load(); !cfg.TLS {
+		t.Error("BRIDGE_TLS=true did not turn TLS on")
+	}
+
+	t.Setenv("BRIDGE_TLS", "1")
+	if cfg := Load(); cfg.TLS {
+		t.Error("only \"true\" should turn TLS on, so a half-set variable cannot enable it by accident")
+	}
+}
