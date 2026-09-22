@@ -30,8 +30,10 @@ type Account struct {
 
 // MailService turns an account session into Mail API calls.
 type MailService struct {
-	api             commands.Client
-	account         Account
+	api          commands.Client
+	accountMutex sync.RWMutex
+	account      Account
+
 	log             *logger.Logger
 	threadsMutex    sync.Mutex
 	threads         map[string]api.EmailResponseDto
@@ -55,6 +57,19 @@ func New(client commands.Client, account Account, serverPublicKey []byte, log *l
 		serverPublicKey: serverPublicKey,
 		sentCopies:      make(map[string]string, sentCopiesKept),
 	}
+}
+
+func (s *MailService) SetToken(token string) {
+	s.accountMutex.Lock()
+	defer s.accountMutex.Unlock()
+
+	s.account.Token = token
+}
+
+func (s *MailService) token() string {
+	s.accountMutex.RLock()
+	defer s.accountMutex.RUnlock()
+	return s.account.Token
 }
 
 // ForgetThreads drops the messages remembered during a sync.
@@ -84,17 +99,17 @@ func (s *MailService) rememberedEmail(emailID string) (api.EmailResponseDto, boo
 
 // ListMailboxes returns the account's folders.
 func (s *MailService) ListMailboxes(ctx context.Context) ([]api.MailboxResponseDto, error) {
-	return commands.ListMailboxes(ctx, s.api, s.account.Token)
+	return commands.ListMailboxes(ctx, s.api, s.token())
 }
 
 // ListEmails returns one page of email summaries from a folder.
 func (s *MailService) ListEmails(ctx context.Context, opts api.ListEmailsOptions) (api.EmailListResponseDto, error) {
-	return commands.ListEmails(ctx, s.api, s.account.Token, opts)
+	return commands.ListEmails(ctx, s.api, s.token(), opts)
 }
 
 // ListAllEmails returns every email in a folder, paging through the API.
 func (s *MailService) ListAllEmails(ctx context.Context, opts api.ListEmailsOptions) ([]api.EmailSummaryResponseDto, error) {
-	return commands.ListAllEmails(ctx, s.api, s.account.Token, opts, s.decryptionAccount(), func(err error) {
+	return commands.ListAllEmails(ctx, s.api, s.token(), opts, s.decryptionAccount(), func(err error) {
 		s.log.Warn("listing without a preview: %v", err)
 	})
 }
@@ -130,7 +145,7 @@ func (s *MailService) ResolveAttachments(ctx context.Context, emailID string, li
 		return literal, nil
 	}
 
-	blobs, err := commands.DownloadAttachments(ctx, s.api, s.account.Token, email, s.decryptionAccount(), func(err error) {
+	blobs, err := commands.DownloadAttachments(ctx, s.api, s.token(), email, s.decryptionAccount(), func(err error) {
 		s.log.Warn("serving message %s without one of its attachments: %v", emailID, err)
 	})
 	if err != nil {
@@ -149,7 +164,7 @@ func (s *MailService) email(ctx context.Context, emailID string) (api.EmailRespo
 		return email, nil
 	}
 
-	thread, err := s.api.GetThread(ctx, s.account.Token, emailID)
+	thread, err := s.api.GetThread(ctx, s.token(), emailID)
 	if err != nil {
 		return api.EmailResponseDto{}, err
 	}
@@ -170,7 +185,7 @@ func (s *MailService) email(ctx context.Context, emailID string) (api.EmailRespo
 
 // rawEmail returns the email as the API sent it, envelope and all.
 func (s *MailService) rawEmail(ctx context.Context, emailID string) (api.EmailResponseDto, error) {
-	thread, err := s.api.GetThread(ctx, s.account.Token, emailID)
+	thread, err := s.api.GetThread(ctx, s.token(), emailID)
 	if err != nil {
 		return api.EmailResponseDto{}, err
 	}
@@ -188,22 +203,22 @@ func (s *MailService) rawEmail(ctx context.Context, emailID string) (api.EmailRe
 
 // MarkRead marks emails as read or unread.
 func (s *MailService) MarkRead(ctx context.Context, emailIDs []string, read bool) error {
-	return commands.MarkRead(ctx, s.api, s.account.Token, emailIDs, read)
+	return commands.MarkRead(ctx, s.api, s.token(), emailIDs, read)
 }
 
 // MarkFlagged flags or unflags emails.
 func (s *MailService) MarkFlagged(ctx context.Context, emailIDs []string, flagged bool) error {
-	return commands.MarkFlagged(ctx, s.api, s.account.Token, emailIDs, flagged)
+	return commands.MarkFlagged(ctx, s.api, s.token(), emailIDs, flagged)
 }
 
 // Move puts emails in another mailbox.
 func (s *MailService) Move(ctx context.Context, emailIDs []string, mailbox api.Mailbox) error {
-	return commands.Move(ctx, s.api, s.account.Token, emailIDs, mailbox)
+	return commands.Move(ctx, s.api, s.token(), emailIDs, mailbox)
 }
 
 // Delete removes emails for good.
 func (s *MailService) Delete(ctx context.Context, emailIDs []string) error {
-	return commands.Delete(ctx, s.api, s.account.Token, emailIDs)
+	return commands.Delete(ctx, s.api, s.token(), emailIDs)
 }
 
 // SendEmail parses a raw RFC 5322 message an SMTP client handed over, seals
@@ -214,7 +229,7 @@ func (s *MailService) SendEmail(ctx context.Context, raw []byte, envelopeRecipie
 		return err
 	}
 
-	sentID, err := commands.SendEmail(ctx, s.api, s.account.Token, msg, s.decryptionAccount(), s.serverPublicKey)
+	sentID, err := commands.SendEmail(ctx, s.api, s.token(), msg, s.decryptionAccount(), s.serverPublicKey)
 	if err != nil {
 		return err
 	}
@@ -269,7 +284,7 @@ func (s *MailService) SaveDraft(ctx context.Context, raw []byte) (string, error)
 		return "", err
 	}
 
-	draft, err := commands.SaveDraft(ctx, s.api, s.account.Token, msg, s.decryptionAccount())
+	draft, err := commands.SaveDraft(ctx, s.api, s.token(), msg, s.decryptionAccount())
 	if err != nil {
 		return "", err
 	}
@@ -279,10 +294,13 @@ func (s *MailService) SaveDraft(ctx context.Context, raw []byte) (string, error)
 // DiscardDrafts destroys drafts for good, rather than moving them to the
 // trash the way deleting an ordinary email does.
 func (s *MailService) DiscardDrafts(ctx context.Context, draftIDs []string) error {
-	return commands.DiscardDrafts(ctx, s.api, s.account.Token, draftIDs)
+	return commands.DiscardDrafts(ctx, s.api, s.token(), draftIDs)
 }
 
 func (s *MailService) decryptionAccount() commands.Account {
+	s.accountMutex.RLock()
+	defer s.accountMutex.RUnlock()
+
 	return commands.Account{
 		Address:    s.account.Address,
 		PrivateKey: s.account.PrivateKey,

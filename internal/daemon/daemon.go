@@ -96,7 +96,18 @@ func Run(ctx context.Context, options Options) error {
 	// the background so shutdown still waits on ctx rather than on the parent
 	// sending something.
 	go func() {
-		err := controlClient.Serve(ctx, control.Events{OnResync: imapService.Resync})
+		err := controlClient.Serve(ctx, control.Events{
+			OnResync: imapService.Resync,
+			OnSessionUpdate: func(backend control.BackendSession) {
+				if service == nil {
+					return
+				}
+				service.SetToken(backend.Token)
+				log.Info("The session has been refreshed by the parent in the daemon.")
+				log.Info("NEW TOKEN VALUE: %w", backend.Token)
+			},
+		})
+
 		if err != nil && ctx.Err() == nil {
 			log.Warn("no longer listening to the parent: %v", err)
 		}
