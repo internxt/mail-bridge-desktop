@@ -38,20 +38,23 @@ type OutgoingAttachment struct {
 // over a connection this bridge does not control. Any such recipient makes the
 // whole message deliveryMode EXTERNAL; Internxt addresses only make it
 // INTERNXT.
-func SendEmail(ctx context.Context, client Client, token string, msg OutgoingMessage, account Account, serverPublicKey []byte) error {
+// SendEmail submits the message and returns the ID the backend gave the copy it
+// filed in Sent, which is what lets a client's own copy of it be recognised as the
+// same message rather than stored a second time.
+func SendEmail(ctx context.Context, client Client, token string, msg OutgoingMessage, account Account, serverPublicKey []byte) (string, error) {
 	addresses := uniqueAddresses(msg.To, msg.Cc, msg.Bcc)
 	if len(addresses) == 0 {
-		return fmt.Errorf("send email: no recipients")
+		return "", fmt.Errorf("send email: no recipients")
 	}
 
 	keys, err := lookupKeys(ctx, client, token, addresses)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	recipients, allInternxt, err := sealFor(addresses, keys, serverPublicKey)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if len(account.PublicKey) > 0 {
 		recipients = append(recipients, crypto.Recipient{Address: account.Address, PublicKey: account.PublicKey})
@@ -63,12 +66,12 @@ func SendEmail(ctx context.Context, client Client, token string, msg OutgoingMes
 	if len(msg.Attachments) > 0 {
 		sessionKey, err := crypto.NewSessionKey()
 		if err != nil {
-			return fmt.Errorf("send email: %w", err)
+			return "", fmt.Errorf("send email: %w", err)
 		}
 
 		refs, err := uploadAttachments(ctx, client, token, msg.Attachments, sessionKey)
 		if err != nil {
-			return err
+			return "", err
 		}
 
 		body.AttachmentsSessionKey = sessionKey
@@ -77,7 +80,7 @@ func SendEmail(ctx context.Context, client Client, token string, msg OutgoingMes
 
 	envelope, err := crypto.BuildEnvelope(body, recipients)
 	if err != nil {
-		return fmt.Errorf("send email: seal message: %w", err)
+		return "", fmt.Errorf("send email: seal message: %w", err)
 	}
 
 	deliveryMode := api.SendEmailRequestDtoDeliveryModeINTERNXT
@@ -91,7 +94,7 @@ func SendEmail(ctx context.Context, client Client, token string, msg OutgoingMes
 		return submitReply(ctx, client, token, msg, block, attachments, deliveryMode)
 	}
 
-	_, err = client.SendEmail(ctx, token, api.SendEmailRequestDto{
+	created, err := client.SendEmail(ctx, token, api.SendEmailRequestDto{
 		Subject:      msg.Subject,
 		Encryption:   &block,
 		Attachments:  attachments,
@@ -101,9 +104,9 @@ func SendEmail(ctx context.Context, client Client, token string, msg OutgoingMes
 		DeliveryMode: &deliveryMode,
 	})
 	if err != nil {
-		return fmt.Errorf("send email: %w", err)
+		return "", fmt.Errorf("send email: %w", err)
 	}
-	return nil
+	return created.Id, nil
 }
 
 // submitReply sends the message as an answer to another, so the backend files
@@ -116,11 +119,11 @@ func submitReply(
 	block api.EncryptionBlockDto,
 	attachments *[]api.AttachmentRefDto,
 	deliveryMode api.SendEmailRequestDtoDeliveryMode,
-) error {
+) (string, error) {
 	replyMode := api.ReplyEmailRequestDtoDeliveryMode(deliveryMode)
 	to := msg.To
 
-	_, err := client.ReplyEmail(ctx, token, msg.InReplyToEmailID, api.ReplyEmailRequestDto{
+	created, err := client.ReplyEmail(ctx, token, msg.InReplyToEmailID, api.ReplyEmailRequestDto{
 		Subject:      &msg.Subject,
 		Encryption:   &block,
 		Attachments:  attachments,
@@ -130,9 +133,9 @@ func submitReply(
 		DeliveryMode: &replyMode,
 	})
 	if err != nil {
-		return fmt.Errorf("reply to email %s: %w", msg.InReplyToEmailID, err)
+		return "", fmt.Errorf("reply to email %s: %w", msg.InReplyToEmailID, err)
 	}
-	return nil
+	return created.Id, nil
 }
 
 // uploadAttachments seals each file under sessionKey and stores it, returning

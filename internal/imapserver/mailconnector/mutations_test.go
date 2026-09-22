@@ -208,54 +208,43 @@ func TestCreateMessageOutsideDraftsIsRefused(t *testing.T) {
 	}
 }
 
-// TestCreateMessageInSentIsAcceptedAndDropped covers the copy a client files
-// after delivering. The backend already stored one while sending, so keeping
-// this would show the message twice — and refusing it makes the client report
-// that it could not save the copy.
-func TestCreateMessageInSentIsAcceptedAndDropped(t *testing.T) {
-	service := &fakeMailService{}
+// TestCreateMessageInSentAnswersWithTheStoredCopy covers the copy a client files after
+// delivering. The backend stored that message while sending it, so the answer is the ID
+// it gave that copy: Gluon recognises it and keeps the one message it already has,
+// instead of a second one the account never had.
+func TestCreateMessageInSentAnswersWithTheStoredCopy(t *testing.T) {
+	service := &fakeMailService{sentCopyID: "M1a2b3c"}
 	c := connectorWithMailboxes(service)
 
 	message, _, err := c.CreateMessage(context.Background(), sentID, []byte("x"), imap.NewFlagSet(), time.Now())
 	if err != nil {
 		t.Fatalf("CreateMessage: %v", err)
 	}
+	if message.ID != imap.MessageID("M1a2b3c") {
+		t.Errorf("message ID = %q, want the one the backend gave the copy it stored", message.ID)
+	}
 	if service.savedDraft != nil {
 		t.Error("a sent copy should not be stored as a draft")
 	}
 
-	// It has to be taken back: a sync never reports it as deleted, since it was
-	// never in the account to begin with.
+	// Nothing to take back any more. The update that used to do it raced with Gluon's
+	// own bookkeeping for the append, and the client saw that as a failed APPEND.
 	select {
 	case update := <-c.updates:
-		deleted, isDeletion := update.(*imap.MessageDeleted)
-		if !isDeletion {
-			t.Fatalf("update = %T, want a deletion", update)
-		}
-		if deleted.MessageID != message.ID {
-			t.Errorf("deleted %v, want the message just accepted (%v)", deleted.MessageID, message.ID)
-		}
+		t.Fatalf("unexpected update %T; the appended copy needs no undoing", update)
 	default:
-		t.Fatal("the accepted copy was never taken back, so it would linger in the client")
 	}
 }
 
-// TestCreateMessageInSentIsUniqueEachTime guards the rule Gluon enforces on an
-// append: a remote ID it already knows is an error.
-func TestCreateMessageInSentIsUniqueEachTime(t *testing.T) {
+// TestCreateMessageInSentWithoutAStoredCopyIsRefused covers a message the bridge never
+// sent. There is no copy in the account to answer with, and nothing here can create
+// one, so saying no is the honest answer.
+func TestCreateMessageInSentWithoutAStoredCopyIsRefused(t *testing.T) {
 	c := connectorWithMailboxes(&fakeMailService{})
 
-	first, _, err := c.CreateMessage(context.Background(), sentID, []byte("x"), imap.NewFlagSet(), time.Now())
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
-	second, _, err := c.CreateMessage(context.Background(), sentID, []byte("x"), imap.NewFlagSet(), time.Now())
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
-
-	if first.ID == second.ID {
-		t.Errorf("both appends got id %q; Gluon rejects a repeated remote ID", first.ID)
+	_, _, err := c.CreateMessage(context.Background(), sentID, []byte("x"), imap.NewFlagSet(), time.Now())
+	if !errors.Is(err, connector.ErrOperationNotAllowed) {
+		t.Errorf("CreateMessage: got %v, want ErrOperationNotAllowed", err)
 	}
 }
 

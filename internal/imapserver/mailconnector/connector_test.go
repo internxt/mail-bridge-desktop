@@ -29,6 +29,7 @@ type fakeMailService struct {
 	deleted         []string
 	savedDraft      []byte
 	draftID         string
+	sentCopyID      string
 	discardedDrafts []string
 
 	// What the account holds, for the sync to read.
@@ -94,6 +95,10 @@ func (f *fakeMailService) Delete(ctx context.Context, emailIDs []string) error {
 func (f *fakeMailService) DiscardDrafts(ctx context.Context, draftIDs []string) error {
 	f.discardedDrafts = draftIDs
 	return f.writeErr
+}
+
+func (f *fakeMailService) SentCopyID(raw []byte) (string, bool) {
+	return f.sentCopyID, f.sentCopyID != ""
 }
 
 func (f *fakeMailService) SaveDraft(ctx context.Context, raw []byte) (string, error) {
