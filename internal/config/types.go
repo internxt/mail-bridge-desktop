@@ -7,5 +7,7 @@ type Config struct {
 	SMTPDomain      string
 	MailAPI         string
 	LogImapProtocol bool
+	TLS             bool
+
 	ServerPublicKey []byte
 }

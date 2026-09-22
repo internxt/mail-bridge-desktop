@@ -4,9 +4,9 @@
 package smtpserver
 
 import (
-	"bytes"
 	"context"
 	"crypto/subtle"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -31,21 +31,22 @@ const (
 // nil-able: a nil sender still authenticates a client, but Data reports an
 // error instead of submitting anything, so a client sees why nothing sent
 // rather than a message that silently vanishes.
-func New(cfg config.Config, credentials Credentials, sender Sender) *Service {
+//
+// tlsConfig is nil-able too, and what it decides is whether a client is allowed
+// to authenticate in the clear.
+func New(cfg config.Config, credentials Credentials, sender Sender, tlsConfig *tls.Config) *Service {
 	log := logger.New("smtp")
 
 	srv := smtp.NewServer(&backend{log: log, credentials: credentials, sender: sender})
 	srv.Addr = cfg.SMTPAddr
 	srv.Domain = cfg.SMTPDomain
-	// Cleartext credentials: only acceptable because we listen on loopback.
-	// Must go away as soon as TLS is enabled.
-	srv.AllowInsecureAuth = true
+	srv.TLSConfig = tlsConfig
+	srv.AllowInsecureAuth = tlsConfig == nil
 	srv.ReadTimeout = ioTimeout
 	srv.WriteTimeout = ioTimeout
 	srv.MaxMessageBytes = maxMessageBytes
 	srv.MaxRecipients = maxRecipients
 	srv.ErrorLog = smtpLogger{log}
-	srv.Debug = debugWriter{log}
 
 	return &Service{srv: srv, log: log}
 }
@@ -66,27 +67,31 @@ func (s *session) Auth(mech string) (sasl.Server, error) {
 	// that have not yet adopted the authenticated startup flow.
 	return sasl.NewPlainServer(func(identity, username, password string) error {
 		if s.credentials.Password == "" {
-			s.log.Info("auth plain from %s (development mode)", username)
+			s.log.Info("authenticated (development mode)")
 			return nil
 		}
 		if subtle.ConstantTimeCompare([]byte(username), []byte(s.credentials.Username)) != 1 ||
 			subtle.ConstantTimeCompare([]byte(password), []byte(s.credentials.Password)) != 1 {
+			s.log.Warn("rejected a client offering the wrong bridge credentials")
 			return errors.New("invalid local bridge credentials")
 		}
-		s.log.Info("auth plain from %s", username)
+		s.log.Info("authenticated")
 		return nil
 	}), nil
 }
 
+// The envelope is recorded but not logged: who the user writes to is theirs, and a
+// count is enough to follow what a session did.
+
 func (s *session) Mail(from string, opts *smtp.MailOptions) error {
 	s.from = from
-	s.log.Info("mail from %s", from)
+	s.log.Info("accepted an envelope sender")
 	return nil
 }
 
 func (s *session) Rcpt(to string, opts *smtp.RcptOptions) error {
 	s.to = append(s.to, to)
-	s.log.Info("rcpt to %s", to)
+	s.log.Info("accepted recipient %d", len(s.to))
 	return nil
 }
 
@@ -97,16 +102,16 @@ func (s *session) Data(r io.Reader) error {
 	}
 
 	if s.sender == nil {
-		s.log.Warn("data from %s to %v: %d bytes, dropped (no mail service available)", s.from, s.to, len(raw))
+		s.log.Warn("dropped a message of %d bytes for %d recipients: no mail service available", len(raw), len(s.to))
 		return errors.New("mail service unavailable")
 	}
 
 	if err := s.sender.SendEmail(context.Background(), raw, s.to); err != nil {
-		s.log.Warn("send from %s to %v failed: %v", s.from, s.to, err)
+		s.log.Warn("could not send a message of %d bytes to %d recipients: %v", len(raw), len(s.to), err)
 		return fmt.Errorf("send: %w", err)
 	}
 
-	s.log.Info("sent %d bytes from %s to %v", len(raw), s.from, s.to)
+	s.log.Info("sent a message of %d bytes to %d recipients", len(raw), len(s.to))
 	return nil
 }
 
@@ -126,13 +131,23 @@ func (s *Service) Start() error {
 	if err != nil {
 		return err
 	}
+	s.listener = ln
 	go func() {
-		if err := s.srv.Serve(ln); err != nil && !errors.Is(err, smtp.ErrServerClosed) {
+		if err := s.srv.Serve(acceptEither(ln, s.srv.TLSConfig)); err != nil && !errors.Is(err, smtp.ErrServerClosed) {
 			s.log.Error("serve: %v", err)
 		}
 	}()
 	s.log.Info("listening on %s", s.srv.Addr)
 	return nil
+}
+
+// Address is where the service actually bound, which is only the configured
+// address until a port of 0 asks the system to choose one.
+func (s *Service) Address() string {
+	if s.listener == nil {
+		return s.srv.Addr
+	}
+	return s.listener.Addr().String()
 }
 
 func (s *Service) Stop(ctx context.Context) error {
@@ -146,8 +161,3 @@ func (s *Service) Stop(ctx context.Context) error {
 
 func (l smtpLogger) Printf(format string, v ...any) { l.log.Error(format, v...) }
 func (l smtpLogger) Println(v ...any)               { l.log.Error("%s", fmt.Sprintln(v...)) }
-
-func (w debugWriter) Write(p []byte) (int, error) {
-	w.log.Info("%s", bytes.TrimRight(p, "\r\n"))
-	return len(p), nil
-}

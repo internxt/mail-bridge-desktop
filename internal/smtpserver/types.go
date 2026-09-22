@@ -2,6 +2,7 @@ package smtpserver
 
 import (
 	"context"
+	"net"
 
 	"mail-bridge-desktop/internal/logger"
 
@@ -35,12 +36,10 @@ type session struct {
 }
 
 type Service struct {
-	srv *smtp.Server
-	log *logger.Logger
+	srv      *smtp.Server
+	listener net.Listener
+	log      *logger.Logger
 }
 
 // smtpLogger adapts our logger to the interface go-smtp expects.
 type smtpLogger struct{ log *logger.Logger }
-
-// debugWriter dumps the SMTP dialogue to the logger while debugging.
-type debugWriter struct{ log *logger.Logger }

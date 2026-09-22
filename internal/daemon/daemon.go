@@ -6,6 +6,7 @@ package daemon
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -20,6 +21,7 @@ import (
 	"mail-bridge-desktop/internal/imapserver"
 	"mail-bridge-desktop/internal/imapserver/attachmentstore"
 	"mail-bridge-desktop/internal/imapserver/mailconnector"
+	"mail-bridge-desktop/internal/localtls"
 	"mail-bridge-desktop/internal/logger"
 	"mail-bridge-desktop/internal/mail"
 	"mail-bridge-desktop/internal/smtpserver"
@@ -50,13 +52,22 @@ func Run(ctx context.Context, options Options) error {
 		log.Warn("serving fixture mail: %v", serviceErr)
 	}
 
-	imapService, err := startIMAP(ctx, options, session, service, controlClient)
+	var tlsConfig *tls.Config
+	var certificate []byte
+
+	if options.Config.TLS {
+		if tlsConfig, certificate, err = localTLS(options.StateDir); err != nil {
+			log.Warn("serving without TLS, mail clients will refuse to send a password: %v", err)
+		}
+	}
+
+	imapService, err := startIMAP(ctx, options, session, service, controlClient, tlsConfig)
 	if err != nil {
 		_ = controlClient.SendError("", "start_imap")
 		return err
 	}
 
-	smtpService, err := startSMTP(options, session, senderOrNil(service))
+	smtpService, err := startSMTP(options, session, senderOrNil(service), tlsConfig)
 	if err != nil {
 		_ = imapService.Close(context.Background())
 		_ = controlClient.SendError("", "start_smtp")
@@ -68,6 +79,7 @@ func Run(ctx context.Context, options Options) error {
 		IMAPAddress: imapStatus.Address,
 		SMTPAddress: options.Config.SMTPAddr,
 		StartTLS:    imapStatus.StartTLS,
+		Certificate: base64.StdEncoding.EncodeToString(certificate),
 	}); err != nil {
 		_ = smtpService.Stop(context.Background())
 		_ = imapService.Close(context.Background())
@@ -106,7 +118,7 @@ func Run(ctx context.Context, options Options) error {
 	return shutdownServices(imapService, smtpService)
 }
 
-func startIMAP(ctx context.Context, options Options, session control.Session, service *mail.MailService, controlClient *control.Client) (*imapserver.IMAPServer, error) {
+func startIMAP(ctx context.Context, options Options, session control.Session, service *mail.MailService, controlClient *control.Client, tlsConfig *tls.Config) (*imapserver.IMAPServer, error) {
 	passphrase, err := storagePassphrase(options.StateDir)
 	if err != nil {
 		return nil, fmt.Errorf("start IMAP: %w", err)
@@ -118,6 +130,7 @@ func startIMAP(ctx context.Context, options Options, session control.Session, se
 	}, imapserver.Config{
 		ListenAddress: options.IMAPAddress,
 		DataDir:       options.StateDir,
+		TLSConfig:     tlsConfig,
 		LocalCredentials: imapserver.Credentials{
 			Username: session.MailClient.Username,
 			Password: session.MailClient.Password,
@@ -254,6 +267,16 @@ func decodeKey(encoded string, want int, kind string, log *logger.Logger) []byte
 	return key
 }
 
+// localTLS returns the certificate both local servers present, generating and
+// storing it the first time, along with its DER form for the parent.
+func localTLS(stateDir string) (*tls.Config, []byte, error) {
+	credentials, err := store.New(stateDir)
+	if err != nil {
+		return nil, nil, err
+	}
+	return localtls.Ensure(credentials)
+}
+
 // storagePassphrase reads the key encrypting Gluon's message cache, generating
 // and storing it the first time.
 func storagePassphrase(stateDir string) ([]byte, error) {
@@ -271,11 +294,11 @@ func senderOrNil(service *mail.MailService) smtpserver.Sender {
 	return service
 }
 
-func startSMTP(options Options, session control.Session, sender smtpserver.Sender) (*smtpserver.Service, error) {
+func startSMTP(options Options, session control.Session, sender smtpserver.Sender, tlsConfig *tls.Config) (*smtpserver.Service, error) {
 	service := smtpserver.New(options.Config, smtpserver.Credentials{
 		Username: session.MailClient.Username,
 		Password: session.MailClient.Password,
-	}, sender)
+	}, sender, tlsConfig)
 	if err := service.Start(); err != nil {
 		return nil, fmt.Errorf("start SMTP: %w", err)
 	}
