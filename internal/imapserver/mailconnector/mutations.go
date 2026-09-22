@@ -7,7 +7,6 @@ import (
 
 	"github.com/ProtonMail/gluon/connector"
 	"github.com/ProtonMail/gluon/imap"
-	"github.com/google/uuid"
 
 	"mail-bridge-desktop/internal/api"
 )
@@ -134,19 +133,21 @@ func (c *MailConnector) CreateMessage(ctx context.Context, mboxID imap.MailboxID
 		return imap.Message{ID: imap.MessageID(id), Flags: flags, Date: date}, literal, nil
 
 	case api.MailboxSent:
-		id := discardedMessageID()
-		c.updates <- imap.NewMessagesDeleted(id)
-		c.log.Info("dropped a sent copy the backend already stores")
-		return imap.Message{ID: id, Flags: flags, Date: date}, literal, nil
+		return c.sentCopy(literal, flags, date)
 
 	default:
 		return imap.Message{}, nil, connector.ErrOperationNotAllowed
 	}
 }
 
-// discardedMessageID names a message that was accepted but not stored. It has
-// to be unique, since Gluon rejects an append that comes back with an ID it
-// already knows, and it must never collide with an ID the API could give out.
-func discardedMessageID() imap.MessageID {
-	return imap.MessageID("bridge-discarded-" + uuid.NewString())
+// sentCopy answers a client filing its own copy of a message it has just sent.
+func (c *MailConnector) sentCopy(literal []byte, flags imap.FlagSet, date time.Time) (imap.Message, []byte, error) {
+	id, sent := c.service.SentCopyID(literal)
+	if !sent {
+		c.log.Warn("refusing a copy in Sent that this bridge did not send")
+		return imap.Message{}, nil, connector.ErrOperationNotAllowed
+	}
+
+	c.log.Info("filed a sent copy under the message the backend already stores")
+	return imap.Message{ID: imap.MessageID(id), Flags: flags, Date: date}, literal, nil
 }

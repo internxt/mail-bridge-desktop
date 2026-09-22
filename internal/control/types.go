@@ -42,9 +42,6 @@ type Ready struct {
 	IMAPAddress string `json:"imap_address"`
 	SMTPAddress string `json:"smtp_address"`
 	StartTLS    bool   `json:"starttls"`
-
-	// Certificate is the servers' own, base64 DER, for the parent to ask the
-	// system to trust. Empty when the bridge is serving without TLS.
 	Certificate string `json:"certificate,omitempty"`
 }
 

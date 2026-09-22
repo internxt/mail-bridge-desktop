@@ -126,6 +126,17 @@ func messageID(email api.EmailResponseDto) string {
 	return fmt.Sprintf("<%s@%s>", email.Id, MessageIDDomain)
 }
 
+// messageIDHeaderOf is the Message-ID a client stamped on a message it handed over.
+// It is the only identifier shared by the message submitted over SMTP and the copy the
+// same client appends to Sent straight after.
+func messageIDHeaderOf(raw []byte) string {
+	parsed, err := mail.ReadMessage(bytes.NewReader(raw))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(parsed.Header.Get("Message-Id"))
+}
+
 // EmailIDFromMessageID is the inverse of messageID: it recovers the account's
 // own identifier from a Message-ID the bridge wrote.
 

@@ -46,7 +46,7 @@ func TestSendEmailToAllInternxtRecipientsIsEncryptedAndINTERNXT(t *testing.T) {
 		},
 	}
 
-	err := SendEmail(context.Background(), client, "tok", OutgoingMessage{
+	_, err := SendEmail(context.Background(), client, "tok", OutgoingMessage{
 		Subject:  "hola",
 		TextBody: "cuerpo del mensaje",
 		To:       []api.EmailAddressDto{addr("bob@inxt.eu")},
@@ -121,7 +121,7 @@ func TestSendEmailSealsTheHTMLBody(t *testing.T) {
 		recipientKeys: []api.RecipientKeyDto{{Address: "bob@inxt.eu", PublicKey: &publicKey}},
 	}
 
-	err := SendEmail(context.Background(), client, "tok", OutgoingMessage{
+	_, err := SendEmail(context.Background(), client, "tok", OutgoingMessage{
 		Subject:  "hola",
 		TextBody: "texto plano",
 		HTMLBody: "<p>cuerpo en HTML</p>",
@@ -149,7 +149,7 @@ func TestSendEmailSealsAnHTMLOnlyMessage(t *testing.T) {
 		recipientKeys: []api.RecipientKeyDto{{Address: "bob@inxt.eu", PublicKey: &publicKey}},
 	}
 
-	err := SendEmail(context.Background(), client, "tok", OutgoingMessage{
+	_, err := SendEmail(context.Background(), client, "tok", OutgoingMessage{
 		Subject:  "hola",
 		HTMLBody: "<p>solo HTML</p>",
 		To:       []api.EmailAddressDto{addr("bob@inxt.eu")},
@@ -177,7 +177,7 @@ func TestSendEmailSealsAndUploadsAttachments(t *testing.T) {
 	}
 
 	content := []byte("el contenido del adjunto")
-	err := SendEmail(context.Background(), client, "tok", OutgoingMessage{
+	_, err := SendEmail(context.Background(), client, "tok", OutgoingMessage{
 		Subject:  "hola",
 		TextBody: "cuerpo",
 		To:       []api.EmailAddressDto{addr("bob@inxt.eu")},
@@ -228,7 +228,7 @@ func TestSendEmailReferencesTheUploadedAttachment(t *testing.T) {
 		recipientKeys: []api.RecipientKeyDto{{Address: "bob@inxt.eu", PublicKey: &publicKey}},
 	}
 
-	err := SendEmail(context.Background(), client, "tok", OutgoingMessage{
+	_, err := SendEmail(context.Background(), client, "tok", OutgoingMessage{
 		Subject:  "hola",
 		TextBody: "cuerpo",
 		To:       []api.EmailAddressDto{addr("bob@inxt.eu")},
@@ -266,7 +266,7 @@ func TestSendEmailStopsWhenAnAttachmentFails(t *testing.T) {
 		uploadErr:     errors.New("the upload allowance is exhausted"),
 	}
 
-	err := SendEmail(context.Background(), client, "tok", OutgoingMessage{
+	_, err := SendEmail(context.Background(), client, "tok", OutgoingMessage{
 		Subject:  "hola",
 		TextBody: "cuerpo",
 		To:       []api.EmailAddressDto{addr("bob@inxt.eu")},
@@ -290,7 +290,7 @@ func TestSendEmailWithoutAttachmentsUploadsNothing(t *testing.T) {
 		recipientKeys: []api.RecipientKeyDto{{Address: "bob@inxt.eu", PublicKey: &publicKey}},
 	}
 
-	err := SendEmail(context.Background(), client, "tok", OutgoingMessage{
+	_, err := SendEmail(context.Background(), client, "tok", OutgoingMessage{
 		Subject:  "hola",
 		TextBody: "cuerpo",
 		To:       []api.EmailAddressDto{addr("bob@inxt.eu")},
@@ -316,7 +316,7 @@ func TestSendEmailRepliesThroughTheReplyEndpoint(t *testing.T) {
 		recipientKeys: []api.RecipientKeyDto{{Address: "bob@inxt.eu", PublicKey: &publicKey}},
 	}
 
-	err := SendEmail(context.Background(), client, "tok", OutgoingMessage{
+	_, err := SendEmail(context.Background(), client, "tok", OutgoingMessage{
 		Subject:          "Re: hola",
 		TextBody:         "respuesta",
 		InReplyToEmailID: "M1",
@@ -355,7 +355,7 @@ func TestSendEmailRepliesWithTheComposedSubjectAndRecipients(t *testing.T) {
 		},
 	}
 
-	err := SendEmail(context.Background(), client, "tok", OutgoingMessage{
+	_, err := SendEmail(context.Background(), client, "tok", OutgoingMessage{
 		Subject:          "Re: hola",
 		TextBody:         "respuesta",
 		InReplyToEmailID: "M1",
@@ -386,7 +386,7 @@ func TestSendEmailWithoutAReplyIdUsesTheSendEndpoint(t *testing.T) {
 		recipientKeys: []api.RecipientKeyDto{{Address: "bob@inxt.eu", PublicKey: &publicKey}},
 	}
 
-	err := SendEmail(context.Background(), client, "tok", OutgoingMessage{
+	_, err := SendEmail(context.Background(), client, "tok", OutgoingMessage{
 		Subject:  "hola",
 		TextBody: "cuerpo",
 		To:       []api.EmailAddressDto{addr("bob@inxt.eu")},
@@ -409,7 +409,7 @@ func TestSendEmailIncludesTheSendersOwnWrappedKey(t *testing.T) {
 		recipientKeys: []api.RecipientKeyDto{{Address: "bob@inxt.eu", PublicKey: &publicKey}},
 	}
 
-	err := SendEmail(context.Background(), client, "tok", OutgoingMessage{
+	_, err := SendEmail(context.Background(), client, "tok", OutgoingMessage{
 		Subject:  "hola",
 		TextBody: "cuerpo",
 		To:       []api.EmailAddressDto{addr("bob@inxt.eu")},
@@ -430,7 +430,7 @@ func TestSendEmailWithAnExternalRecipientUsesServerKeyAndEXTERNAL(t *testing.T) 
 		},
 	}
 
-	err := SendEmail(context.Background(), client, "tok", OutgoingMessage{
+	_, err := SendEmail(context.Background(), client, "tok", OutgoingMessage{
 		Subject:  "hola",
 		TextBody: "cuerpo",
 		To:       []api.EmailAddressDto{addr("carol@example.com")},
@@ -453,7 +453,7 @@ func TestSendEmailWithoutServerKeyFailsForExternalRecipients(t *testing.T) {
 		recipientKeys: []api.RecipientKeyDto{{Address: "carol@example.com", PublicKey: nil}},
 	}
 
-	err := SendEmail(context.Background(), client, "tok", OutgoingMessage{
+	_, err := SendEmail(context.Background(), client, "tok", OutgoingMessage{
 		Subject:  "hola",
 		TextBody: "cuerpo",
 		To:       []api.EmailAddressDto{addr("carol@example.com")},
@@ -469,7 +469,7 @@ func TestSendEmailWithoutServerKeyFailsForExternalRecipients(t *testing.T) {
 func TestSendEmailPropagatesLookupFailure(t *testing.T) {
 	client := &fakeClient{lookupErr: errors.New("api is down")}
 
-	err := SendEmail(context.Background(), client, "tok", OutgoingMessage{
+	_, err := SendEmail(context.Background(), client, "tok", OutgoingMessage{
 		Subject: "hola",
 		To:      []api.EmailAddressDto{addr("bob@inxt.eu")},
 	}, Account{Address: "alice@inxt.eu"}, nil)
@@ -485,7 +485,7 @@ func TestSendEmailPropagatesSendFailure(t *testing.T) {
 		sendErr:       errors.New("api is down"),
 	}
 
-	err := SendEmail(context.Background(), client, "tok", OutgoingMessage{
+	_, err := SendEmail(context.Background(), client, "tok", OutgoingMessage{
 		Subject: "hola",
 		To:      []api.EmailAddressDto{addr("bob@inxt.eu")},
 	}, Account{Address: "alice@inxt.eu"}, nil)
@@ -497,7 +497,7 @@ func TestSendEmailPropagatesSendFailure(t *testing.T) {
 func TestSendEmailRequiresAtLeastOneRecipient(t *testing.T) {
 	client := &fakeClient{}
 
-	if err := SendEmail(context.Background(), client, "tok", OutgoingMessage{Subject: "hola"}, Account{}, nil); err == nil {
+	if _, err := SendEmail(context.Background(), client, "tok", OutgoingMessage{Subject: "hola"}, Account{}, nil); err == nil {
 		t.Fatal("expected an error, got nil")
 	}
 }
@@ -510,7 +510,7 @@ func TestSendEmailDeduplicatesAcrossToAndCc(t *testing.T) {
 		recipientKeys: []api.RecipientKeyDto{{Address: "bob@inxt.eu", PublicKey: &publicKey}},
 	}
 
-	err := SendEmail(context.Background(), client, "tok", OutgoingMessage{
+	_, err := SendEmail(context.Background(), client, "tok", OutgoingMessage{
 		Subject:  "hola",
 		TextBody: "cuerpo",
 		To:       []api.EmailAddressDto{addr("bob@inxt.eu")},

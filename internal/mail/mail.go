@@ -36,7 +36,15 @@ type MailService struct {
 	threadsMutex    sync.Mutex
 	threads         map[string]api.EmailResponseDto
 	serverPublicKey []byte
+
+	sentMutex  sync.Mutex
+	sentCopies map[string]string
+	sentOrder  []string
 }
+
+// sentCopiesKept bounds what SendEmail remembers. A client appends its copy of a
+// message seconds after sending it, so only the last few are ever asked for.
+const sentCopiesKept = 32
 
 func New(client commands.Client, account Account, serverPublicKey []byte, log *logger.Logger) *MailService {
 	return &MailService{
@@ -45,6 +53,7 @@ func New(client commands.Client, account Account, serverPublicKey []byte, log *l
 		log:             log,
 		threads:         make(map[string]api.EmailResponseDto),
 		serverPublicKey: serverPublicKey,
+		sentCopies:      make(map[string]string, sentCopiesKept),
 	}
 }
 
@@ -204,7 +213,52 @@ func (s *MailService) SendEmail(ctx context.Context, raw []byte, envelopeRecipie
 	if err != nil {
 		return err
 	}
-	return commands.SendEmail(ctx, s.api, s.account.Token, msg, s.decryptionAccount(), s.serverPublicKey)
+
+	sentID, err := commands.SendEmail(ctx, s.api, s.account.Token, msg, s.decryptionAccount(), s.serverPublicKey)
+	if err != nil {
+		return err
+	}
+
+	s.rememberSentCopy(raw, sentID)
+	return nil
+}
+
+// SentCopyID is the ID the backend gave the copy it filed when this very message was
+// sent through the bridge. A client appends its own copy to Sent right afterwards, and
+// answering that append with this ID is what keeps the two from becoming two messages.
+func (s *MailService) SentCopyID(raw []byte) (string, bool) {
+	messageID := messageIDHeaderOf(raw)
+	if messageID == "" {
+		return "", false
+	}
+
+	s.sentMutex.Lock()
+	defer s.sentMutex.Unlock()
+
+	id, found := s.sentCopies[messageID]
+	return id, found
+}
+
+// rememberSentCopy files a message under the Message-ID its client stamped on it,
+// which is the only thing the append that follows will have in common with it.
+func (s *MailService) rememberSentCopy(raw []byte, sentID string) {
+	messageID := messageIDHeaderOf(raw)
+	if messageID == "" || sentID == "" {
+		return
+	}
+
+	s.sentMutex.Lock()
+	defer s.sentMutex.Unlock()
+
+	if _, known := s.sentCopies[messageID]; !known {
+		s.sentOrder = append(s.sentOrder, messageID)
+	}
+	s.sentCopies[messageID] = sentID
+
+	for len(s.sentOrder) > sentCopiesKept {
+		delete(s.sentCopies, s.sentOrder[0])
+		s.sentOrder = s.sentOrder[1:]
+	}
 }
 
 // SaveDraft stores a message a client is still writing, sealed for the
