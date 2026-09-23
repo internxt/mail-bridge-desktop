@@ -55,9 +55,9 @@ jobs:
             os: linux
             arch: amd64
           - runner: macos-14
-            target: darwin-arm64
+            target: darwin-universal
             os: darwin
-            arch: arm64
+            arch: universal
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
@@ -81,8 +81,8 @@ jobs:
           CGO_ENABLED: "1"
         run: go test ./...
 
-      - name: Build and archive (Linux and macOS)
-        if: runner.os != 'Windows'
+      - name: Build and archive (Linux)
+        if: runner.os == 'Linux'
         env:
           CGO_ENABLED: "1"
           GOOS: ${{ matrix.os }}
@@ -98,6 +98,35 @@ jobs:
           go build -trimpath -ldflags='-s -w' -o dist/package/mail-bridge ./cmd/bridge
           test -f dist/package/mail-bridge
           tar -C dist/package -czf "dist/mail-bridge_${version}_${TARGET_OS}_${TARGET_ARCH}.tar.gz" mail-bridge
+
+      - name: Build and archive (macOS)
+        if: runner.os == 'macOS'
+        env:
+          CGO_ENABLED: "1"
+          GOOS: darwin
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          mkdir -p dist/package
+
+          for arch in arm64 amd64; do
+            case "$arch" in
+              arm64) machine=arm64  ;;
+              amd64) machine=x86_64 ;;
+            esac
+            GOARCH="$arch" \
+            CGO_CFLAGS="-arch $machine" \
+            CGO_LDFLAGS="-arch $machine" \
+              go build -trimpath -ldflags='-s -w' -o "dist/$arch" ./cmd/bridge
+          done
+
+          lipo -create dist/arm64 dist/amd64 -output dist/package/mail-bridge
+          lipo -archs dist/package/mail-bridge | grep -q x86_64
+          lipo -archs dist/package/mail-bridge | grep -q arm64
+
+          tar -C dist/package -czf "dist/mail-bridge_${version}_darwin_universal.tar.gz" mail-bridge
 
       - name: Build and archive (Windows)
         if: runner.os == 'Windows'
@@ -144,19 +173,6 @@ jobs:
           pattern: release-*
           path: release
           merge-multiple: true
-
-      - name: Generate manifest and checksums
-        env:
-          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
-          REPOSITORY: ${{ github.repository }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          version="${RELEASE_TAG#v}"
-          ./scripts/generate-release-manifest.sh \
-            "$version" \
-            "https://github.com/${REPOSITORY}/releases/download/${RELEASE_TAG}" \
-            release
 
       - name: Create draft release or upload its assets
         env:

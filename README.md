@@ -96,20 +96,17 @@ Release (or an equivalent immutable artifact store) with the following assets.
 | ------------------- | ----------------------------------------- | ------------------------- |
 | Windows x64         | `mail-bridge_VERSION_windows_amd64.zip`   | `mail-bridge.exe`         |
 | Linux x64           | `mail-bridge_VERSION_linux_amd64.tar.gz`  | `mail-bridge`             |
-| macOS Apple Silicon | `mail-bridge_VERSION_darwin_arm64.tar.gz` | `mail-bridge`             |
+| macOS (universal)   | `mail-bridge_VERSION_darwin_universal.tar.gz` | `mail-bridge`         |
 
 Each archive contains exactly one executable at the archive root. It must not
 contain a directory named after the version or target. This makes the path
 inside an Electron resource bundle stable.
 
-The release also contains:
+GitHub records a SHA-256 for every asset it serves, reported as `digest` on the
+asset in the releases API. That is the checksum to verify a download against;
+the release carries no checksum file of its own.
 
-- `manifest.json`, conforming to
-  [`release/manifest.schema.json`](release/manifest.schema.json).
-- `checksums.txt`, with one line per binary archive in standard SHA-256 format:
-  `<lowercase-hex-sha256>  <filename>`.
-
-The manifest is the consumption contract. Consumers select an entry by `os`
-and `arch`, download `url`, verify `sha256` against the downloaded archive,
-and extract the named `executable`. They must pin an exact `version` so they
-must never request a moving `latest` release.
+Consumers ask the API for a release by tag, pick the asset for their platform
+from the table above, download it, check it against that `digest`, and extract
+the executable. They must pin an exact version and never request a moving
+`latest` release.
