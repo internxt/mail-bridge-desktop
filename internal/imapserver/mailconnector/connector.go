@@ -3,6 +3,7 @@ package mailconnector
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/ProtonMail/gluon/connector"
 	"github.com/ProtonMail/gluon/imap"
@@ -32,6 +33,7 @@ const updateBufferSize = 32
 const (
 	listEmailsLimit      = 100
 	fetchBodyConcurrency = 8
+	messageAnnounceBatch = 15
 )
 
 // Authorize is replaced by authConnector, which the server wraps every
@@ -124,28 +126,57 @@ func (c *MailConnector) forgetDeleted(seen map[string]messageState) {
 	}
 }
 
-// announceNewMessages announces messages Gluon has never seen, fetching their bodies.
+// announceNewMessages announces messages Gluon has never seen, fetching their
+// bodies. It reports them in batches of messageAnnounceBatch as fetches
+// complete — in completion order, not summary order, since with several
+// fetches running at once waiting for a strict order would let one slow
+// message hold up others that are already in hand — so the client's mailbox
+// fills in progressively instead of staying empty until every message in it
+// has downloaded.
 func (c *MailConnector) announceNewMessages(ctx context.Context, mailbox api.MailboxResponseDto, summaries []api.EmailSummaryResponseDto, progress *progressReporter) error {
 	if len(summaries) == 0 {
 		return nil
 	}
 
-	literals := make([][]byte, len(summaries))
-
 	group, groupCtx := errgroup.WithContext(ctx)
 	group.SetLimit(fetchBodyConcurrency)
 
-	for i, summary := range summaries {
+	var mu sync.Mutex
+	pending := make([]*imap.MessageCreated, 0, messageAnnounceBatch)
+
+	flush := func() {
+		mu.Lock()
+		batch := pending
+		pending = nil
+		mu.Unlock()
+
+		if len(batch) > 0 {
+			c.updates <- imap.NewMessagesCreated(true, batch...)
+		}
+	}
+
+	for _, summary := range summaries {
 		group.Go(func() error {
 			literal, err := c.service.GetMessageLiteral(groupCtx, summary.Id)
-
 			if err != nil {
 				c.log.Warn("serving message %s without its body: %v", summary.Id, err)
 			}
-
-			literals[i] = literal
-
 			progress.advance()
+
+			message, err := toIMAPMessage(mailbox, summary, literal)
+			if err != nil {
+				c.log.Warn("skipping message %s: %v", summary.Id, err)
+				return nil
+			}
+
+			mu.Lock()
+			pending = append(pending, &message)
+			full := len(pending) >= messageAnnounceBatch
+			mu.Unlock()
+
+			if full {
+				flush()
+			}
 			return nil
 		})
 	}
@@ -154,22 +185,7 @@ func (c *MailConnector) announceNewMessages(ctx context.Context, mailbox api.Mai
 		return fmt.Errorf("fetch message bodies: %w", err)
 	}
 
-	messages := make([]*imap.MessageCreated, 0, len(summaries))
-
-	for i, summary := range summaries {
-		message, err := toIMAPMessage(mailbox, summary, literals[i])
-
-		if err != nil {
-			c.log.Warn("skipping message %s: %v", summary.Id, err)
-			continue
-		}
-
-		messages = append(messages, &message)
-	}
-
-	if len(messages) > 0 {
-		c.updates <- imap.NewMessagesCreated(true, messages...)
-	}
+	flush()
 
 	return nil
 }
