@@ -3,6 +3,7 @@ package mailconnector
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/ProtonMail/gluon/imap"
@@ -80,6 +81,51 @@ func TestSyncAnnouncesNewMail(t *testing.T) {
 	}
 	if got := len(service.fetchedBodies()); got != 2 {
 		t.Fatalf("fetched %d bodies, want 2", got)
+	}
+}
+
+// TestSyncAnnouncesNewMailInBatches is why messageAnnounceBatch exists: a
+// mailbox with more new messages than fit in one batch should reach the
+// client in several smaller announcements, none over the batch size, rather
+// than staying empty until the very last body has downloaded.
+func TestSyncAnnouncesNewMailInBatches(t *testing.T) {
+	const total = messageAnnounceBatch*2 + 2
+
+	summaries := make([]api.EmailSummaryResponseDto, total)
+	for i := range summaries {
+		summaries[i] = summary(fmt.Sprintf("M%d", i), "a")
+	}
+
+	service := syncService(summaries...)
+	c := testConnector(service)
+
+	if err := c.Sync(context.Background()); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+
+	updates := drainUpdates(c)
+	created := 0
+	seen := make(map[string]bool, total)
+
+	for _, update := range updates {
+		batch, ok := update.(*imap.MessagesCreated)
+		if !ok {
+			continue
+		}
+		created++
+		if len(batch.Messages) > messageAnnounceBatch {
+			t.Errorf("a batch carried %d messages, want at most %d", len(batch.Messages), messageAnnounceBatch)
+		}
+		for _, message := range batch.Messages {
+			seen[string(message.Message.ID)] = true
+		}
+	}
+
+	if created < 2 {
+		t.Fatalf("got %d MessagesCreated updates, want more than one for %d new messages", created, total)
+	}
+	if len(seen) != total {
+		t.Fatalf("announced %d distinct messages, want %d — none lost or duplicated across batches", len(seen), total)
 	}
 }
 

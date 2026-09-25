@@ -31,10 +31,14 @@ func (r router) Get(key string) ([]byte, error) {
 }
 
 func (r router) Set(key string, value []byte) error {
-	if err := r.Remove(key); err != nil {
+	target, other := r.keychain, r.disk
+	if r.backendFor(len(value)) == r.disk {
+		target, other = r.disk, r.keychain
+	}
+	if err := target.Set(key, value); err != nil {
 		return err
 	}
-	return r.backendFor(len(value)).Set(key, value)
+	return other.Remove(key)
 }
 
 func (r router) Remove(key string) error {
