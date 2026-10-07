@@ -76,6 +76,9 @@ func (c *MailConnector) Sync(ctx context.Context) error {
 
 	mailboxes, err := c.service.ListMailboxes(ctx)
 	if err != nil {
+		// A sync somebody asked for has to end with a report they can see, even
+		// when it fails before there is any total; a timed poll stays quiet.
+		newProgressReporter(ctx, c.sync, 0).finish("list_mailboxes")
 		return fmt.Errorf("list mailboxes: %w", err)
 	}
 

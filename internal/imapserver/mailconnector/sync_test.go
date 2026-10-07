@@ -344,3 +344,50 @@ func TestSyncAnnouncesAFolderOnce(t *testing.T) {
 		t.Fatalf("announced the mailbox %d then %d times, want 1 then 0", first, second)
 	}
 }
+
+// TestSyncRequestedReportsListMailboxesFailure is what keeps a resync button
+// from waiting forever: a listing failure happens before any total is known,
+// but a sync somebody explicitly asked for still has to close.
+func TestSyncRequestedReportsListMailboxesFailure(t *testing.T) {
+	service := syncService(summary("M1", "a"))
+	service.err = errors.New("mailboxes api is down")
+
+	var recorded recorder
+	c := testConnector(service)
+	c.sync = recorded.events()
+
+	if err := c.Sync(withRequestedSync(context.Background())); err == nil {
+		t.Fatal("Sync: expected an error when listing mailboxes fails")
+	}
+
+	if starts := recorded.allStarts(); len(starts) != 1 || starts[0] != 0 {
+		t.Fatalf("starts = %v, want one start of 0", starts)
+	}
+	if finishes := recorded.allFinishes(); len(finishes) != 1 || finishes[0] != (finish{code: "list_mailboxes"}) {
+		t.Fatalf("finishes = %+v, want one finish with code list_mailboxes", finishes)
+	}
+}
+
+// TestSyncUnrequestedStaysQuietWhenListMailboxesFails is the poll-every-30-
+// seconds case: nobody is watching this cycle, so a listing failure reports
+// nothing, the same as any other unrequested sync that finds nothing worth
+// telling the parent.
+func TestSyncUnrequestedStaysQuietWhenListMailboxesFails(t *testing.T) {
+	service := syncService(summary("M1", "a"))
+	service.err = errors.New("mailboxes api is down")
+
+	var recorded recorder
+	c := testConnector(service)
+	c.sync = recorded.events()
+
+	if err := c.Sync(context.Background()); err == nil {
+		t.Fatal("Sync: expected an error when listing mailboxes fails")
+	}
+
+	if got := len(recorded.allStarts()); got != 0 {
+		t.Errorf("got %d starts, want none", got)
+	}
+	if got := len(recorded.allFinishes()); got != 0 {
+		t.Errorf("got %d finishes, want none", got)
+	}
+}
